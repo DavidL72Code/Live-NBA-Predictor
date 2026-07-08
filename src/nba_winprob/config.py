@@ -27,9 +27,15 @@ class Settings(BaseSettings):
     raw_data_dir: Path = Path("data/raw")
     min_request_interval: float = 1.0
 
-    # Phase 2+: infrastructure (defaults point at local dev services;
-    # real deployments override via environment/.env)
+    # Phase 2: streaming
     kafka_bootstrap_servers: str = "localhost:9092"
+    kafka_events_topic: str = "nba.game.events"
+    kafka_features_topic: str = "nba.game.features"
+    kafka_consumer_group: str = "nba-winprob-processor"
+    # How often the producer polls NBA live endpoints (seconds)
+    live_poll_interval: float = 15.0
+
+    # Phase 3+: feature store / ML (defaults point at local dev services)
     redis_url: str = "redis://localhost:6379/0"
     postgres_dsn: str | None = None
     mlflow_tracking_uri: str | None = None
