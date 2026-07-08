@@ -2,6 +2,8 @@
 
     nba-winprob backfill --seasons 2022-23 2023-24
     nba-winprob build-features --raw-dir data/raw --output data/features/features.parquet
+    nba-winprob produce        # live: poll NBA → publish events to Kafka
+    nba-winprob process        # live: consume events → compute features → publish
 """
 
 from __future__ import annotations
@@ -78,6 +80,20 @@ def cmd_build_features(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_produce(args: argparse.Namespace) -> int:
+    from nba_winprob.streaming.producer import LiveProducer
+
+    LiveProducer(poll_interval=args.interval).run()
+    return 0
+
+
+def cmd_process(args: argparse.Namespace) -> int:
+    from nba_winprob.streaming.processor import StreamProcessor
+
+    StreamProcessor().run()
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -109,6 +125,22 @@ def main(argv: list[str] | None = None) -> int:
         "--run-window", type=float, default=180.0, help="scoring-run window in game seconds"
     )
     build.set_defaults(func=cmd_build_features)
+
+    produce = subparsers.add_parser(
+        "produce", help="poll live NBA games and publish events to Kafka"
+    )
+    produce.add_argument(
+        "--interval",
+        type=float,
+        default=settings.live_poll_interval,
+        help="seconds between live scoreboard polls",
+    )
+    produce.set_defaults(func=cmd_produce)
+
+    process = subparsers.add_parser(
+        "process", help="consume game events from Kafka and publish feature vectors"
+    )
+    process.set_defaults(func=cmd_process)
 
     args = parser.parse_args(argv)
     return args.func(args)
