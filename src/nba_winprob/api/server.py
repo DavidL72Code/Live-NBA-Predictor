@@ -414,6 +414,8 @@ def _fetch_scoreboard(target_date: str) -> list[dict]:
             ) from exc
         if response.status_code >= 400:
             detail = payload.get("detail") or payload.get("message") or str(payload)
+            if response.status_code == 401 and "token_present" in payload:
+                detail = f"{detail} (Render token present: {payload['token_present']})"
             raise RuntimeError(f"NBA Stats proxy HTTP {response.status_code}: {detail}")
     else:
         _configure_stats_proxy()

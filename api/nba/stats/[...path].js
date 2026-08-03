@@ -18,7 +18,10 @@ module.exports = async function handler(req, res) {
   const expectedToken = process.env.NBA_STATS_PROXY_TOKEN || '';
   const suppliedToken = req.headers['x-swoosh-proxy-token'] || '';
   if (!expectedToken || suppliedToken !== expectedToken) {
-    return res.status(401).json({ detail: 'NBA Stats proxy authorization required' });
+    return res.status(401).json({
+      detail: 'NBA Stats proxy authorization required',
+      token_present: Boolean(suppliedToken),
+    });
   }
 
   const upstream = new URL(`https://stats.nba.com/stats/${endpoint}`);
