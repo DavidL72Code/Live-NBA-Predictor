@@ -37,7 +37,18 @@ module.exports = async function handler(req, res) {
       },
     });
     const body = await response.text();
-    res.setHeader('Content-Type', response.headers.get('content-type') || 'application/json');
+    if (!response.ok) {
+      return res.status(502).json({
+        detail: `NBA upstream returned HTTP ${response.status}: ${body.slice(0, 240)}`,
+      });
+    }
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.includes('json')) {
+      return res.status(502).json({
+        detail: `NBA upstream returned non-JSON content (${contentType || 'unknown content type'})`,
+      });
+    }
+    res.setHeader('Content-Type', contentType || 'application/json');
     res.setHeader('Cache-Control', endpoint.toLowerCase().includes('scoreboard')
       ? 'public, s-maxage=30, stale-while-revalidate=120'
       : 'no-store');
