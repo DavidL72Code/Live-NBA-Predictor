@@ -1,0 +1,2263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NBA Win Probability</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap');
+  :root {
+    --bg: #f4f6f9;
+    --surface: #ffffff;
+    --surface2: #edf1f6;
+    --surface3: #f8fafc;
+    --border: #d8e0ea;
+    --text: #10233f;
+    --muted: #687990;
+    --home: #174a9c;
+    --away: #c8102e;
+    --green: #16845a;
+    --red: #c8102e;
+    --accent: #c8102e;
+    --ink: #ffffff;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Manrope', system-ui, sans-serif; font-size: 14px; min-height: 100vh; display: flex; flex-direction: column; overflow-x: hidden; overflow-y: auto; }
+  button, input, select { font: inherit; }
+  button:focus-visible, input:focus-visible, select:focus-visible, .game-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* ── Header ── */
+  header { display: flex; align-items: center; gap: 18px; padding: 14px 24px; background: rgba(12,17,23,.92); border-bottom: 1px solid var(--border); flex-shrink: 0; position: relative; }
+  header::after { content: ''; position: absolute; left: 0; bottom: -1px; width: 112px; height: 2px; background: var(--accent); }
+  header h1 { font-family: 'Barlow Condensed', sans-serif; font-size: 22px; line-height: .9; font-weight: 700; color: var(--text); letter-spacing: .6px; text-transform: uppercase; }
+  header h1 span { color: var(--home); display: block; font-size: 11px; letter-spacing: 2.8px; margin-top: 6px; }
+  .header-nav { display:flex; align-items:center; gap:6px; margin-left:auto; }
+  .header-nav-link { color:#b9d8ff; border:1px solid rgba(185,216,255,.28); padding:7px 10px; border-radius:3px; text-decoration:none; font:700 10px 'DM Mono', monospace; letter-spacing:1px; text-transform:uppercase; transition:background .18s, color .18s, border-color .18s; }
+  .header-nav-link:hover, .header-nav-link:focus-visible { color:#fff; background:rgba(255,255,255,.12); border-color:#b9d8ff; }
+  .header-nav-link.is-primary { background:#c8102e; border-color:#c8102e; color:#fff; }
+  .brand-lockup { display: flex; align-items: center; gap: 12px; }
+  .nba-logo-shell { width: 32px; height: 38px; border: 1px solid rgba(255,255,255,.28); border-radius: 3px; overflow: hidden; background: #c8102e; display: grid; place-items: center; flex-shrink: 0; }
+  .nba-logo { width: 100%; height: 100%; object-fit: contain; display: block; grid-area: 1 / 1; }
+  .nba-logo-fallback { color: #fff; font: 800 8px 'Barlow Condensed', sans-serif; letter-spacing: .4px; }
+  .nba-logo-shell > .nba-logo-fallback { grid-area: 1 / 1; }
+  header::before { content: 'LIVE / MODEL DESK'; color: var(--muted); font: 10px 'DM Mono', monospace; letter-spacing: 1.4px; order: 2; }
+  .date-nav { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+  .date-nav button { background: var(--accent); border: 1px solid var(--accent); color: var(--ink); border-radius: var(--radius); padding: 7px 12px; cursor: pointer; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .7px; }
+  .date-nav button:hover { background: #e7ff9d; }
+  .date-nav input[type="date"] { background: var(--surface2); border: 1px solid var(--border); color: var(--text); border-radius: var(--radius); padding: 7px 10px; font: 12px 'DM Mono', monospace; }
+  .date-nav input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(1); opacity: 0.6; cursor: pointer; }
+
+  /* ── Layout ── */
+  .layout { display: block; min-height: calc(100vh - 62px); overflow: visible; background: var(--bg); }
+
+  /* ── Sidebar ── */
+  .sidebar { width: 284px; flex-shrink: 0; background: rgba(18,25,33,.82); border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
+  .layout.no-slate .game-slate { display: none; }
+  .sidebar-header { padding: 18px 17px 14px; border-bottom: 1px solid var(--border); }
+  .sidebar-count { color: var(--muted); font: 700 10px 'DM Mono', monospace; letter-spacing: 1px; text-transform: uppercase; }
+  .sidebar-date { font: 11px 'DM Mono', monospace; color: var(--muted); font-weight: 500; text-transform: uppercase; letter-spacing: 1.1px; }
+  .game-filters { display: grid; gap: 8px; }
+  .game-type-filter { width: 100%; border: 1px solid var(--border); border-radius: 4px; background: #fff; color: var(--text); padding: 8px 9px; font-size: 11px; }
+  .filter-count { color: var(--muted); font: 9px 'DM Mono', monospace; letter-spacing: .6px; text-transform: uppercase; }
+  .game-list { flex: 1; overflow-y: auto; padding: 12px; }
+  .game-slate { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border); }
+  .game-slate .sidebar-header { padding: 0; border: 0; }
+  .game-slate .game-list { padding: 12px 0 0; max-height: 300px; overflow-y: auto; }
+  .game-list::-webkit-scrollbar { width: 4px; }
+  .game-list::-webkit-scrollbar-track { background: transparent; }
+  .game-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .game-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 12px 11px; margin-bottom: 8px; cursor: pointer; transition: background 0.15s, border-color 0.15s, transform 0.15s; background: rgba(12,18,24,.54); }
+  .game-card:hover { background: var(--surface2); transform: translateX(2px); }
+  .game-card.selected { border-color: var(--home); background: linear-gradient(90deg, rgba(101,214,196,.12), transparent); box-shadow: inset 3px 0 0 var(--home); }
+  .game-card.live-card { border-color: #22c55e40; }
+  .game-matchup { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .game-teams { display: flex; align-items: center; gap: 8px; font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 16px; letter-spacing: .5px; }
+  .team-mark { width: 28px; height: 28px; position: relative; display: inline-grid; place-items: center; border-radius: 50%; background: #edf4ff; border: 1px solid #d8e5f5; overflow: hidden; flex-shrink: 0; }
+  .team-mark img { width: 100%; height: 100%; object-fit: contain; position: absolute; inset: 0; z-index: 1; }
+  .team-mark-fallback { position: absolute; inset: 0; display: grid; place-items: center; color: var(--home); font: 800 9px 'DM Mono', monospace; }
+  .game-score { font: 600 15px 'DM Mono', monospace; font-variant-numeric: tabular-nums; }
+  .game-meta { display: flex; align-items: center; gap: 6px; margin-top: 5px; }
+  .game-type-label { color: var(--muted); font: 9px 'DM Mono', monospace; letter-spacing: .3px; }
+  .status-badge { font: 500 9px 'DM Mono', monospace; padding: 3px 7px; border-radius: 2px; text-transform: uppercase; letter-spacing: 1px; }
+  .status-live { background: #22c55e22; color: #22c55e; }
+  .status-final { background: #ffffff11; color: var(--muted); }
+  .status-scheduled { background: #6366f122; color: #818cf8; }
+  .live-dot { width: 6px; height: 6px; border-radius: 50%; background: #22c55e; animation: pulse 1.5s infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+  .prob-mini { height: 3px; border-radius: 2px; background: var(--border); margin-top: 6px; overflow: hidden; }
+  .prob-mini-fill { height: 100%; background: var(--home); border-radius: 2px; }
+  .game-edge { margin-top:8px; display:grid; grid-template-columns:1fr auto; gap:7px; align-items:center; color:var(--muted); font:700 9px 'DM Mono', monospace; text-transform:uppercase; letter-spacing:.45px; }
+  .game-edge-bar { height:5px; background:#edf1f6; border-radius:2px; overflow:hidden; }
+  .game-edge-fill { height:100%; width:var(--edge); background:linear-gradient(90deg, var(--home), var(--away)); }
+  .game-card-skeleton { min-height:80px; border:1px solid var(--border); border-radius:var(--radius); background:#fff; margin-bottom:8px; overflow:hidden; position:relative; }
+  .game-card-skeleton::after, .skeleton-line::after { content:''; position:absolute; inset:0; transform:translateX(-100%); background:linear-gradient(90deg, transparent, rgba(255,255,255,.72), transparent); animation:bar-shimmer 1.35s ease-in-out infinite; }
+  .model-context { margin-top: 10px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius); background: rgba(255,255,255,.72); }
+  .model-context-header { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:10px; }
+  .model-context-title { color:var(--muted); font:700 10px 'DM Mono', monospace; letter-spacing:1px; text-transform:uppercase; }
+  .model-context-note { color:var(--muted); font-size:10px; }
+  .model-context-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; }
+  .model-context-item { padding:8px; background:var(--surface2); border-radius:4px; }
+  .model-context-label { display:block; color:var(--muted); font:9px 'DM Mono', monospace; text-transform:uppercase; letter-spacing:.4px; }
+  .model-context-value { display:block; margin-top:3px; color:var(--text); font-weight:800; font-variant-numeric:tabular-nums; }
+  .data-freshness { display:flex; align-items:center; gap:7px; margin-top:7px; color:var(--muted); font:10px 'DM Mono', monospace; }
+  .freshness-dot { width:7px; height:7px; border-radius:50%; background:#22c55e; }
+  .freshness-dot.stale { background:var(--away); animation:pulse 1.2s infinite; }
+  .analyst-grounding { margin:10px 0 12px; padding:8px 10px; border-left:2px solid var(--accent); background:rgba(200,16,46,.06); color:var(--muted); font-size:11px; line-height:1.45; }
+  @media (max-width: 640px) { .model-context-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .model-context-header { align-items:flex-start; flex-direction:column; gap:4px; } }
+
+  /* Broadcast motion: reveal the selected game, then keep live changes subtle. */
+  @keyframes detail-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes card-in { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: translateX(0); } }
+  @keyframes bar-shimmer { from { transform: translateX(-120%); } to { transform: translateX(220%); } }
+  @keyframes state-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+  .game-card { animation: card-in .34s ease both; }
+  .game-detail > * { animation: detail-in .42s cubic-bezier(.22,.8,.28,1) both; }
+  .game-detail > *:nth-child(2) { animation-delay: .04s; }
+  .game-detail > *:nth-child(3) { animation-delay: .08s; }
+  .game-detail > *:nth-child(4) { animation-delay: .12s; }
+  .game-detail > *:nth-child(5) { animation-delay: .16s; }
+
+  /* ── Main content ── */
+  .main { flex: 1; min-width: 0; min-height: calc(100vh - 62px); overflow: visible; display: flex; flex-direction: column; background: var(--bg); }
+  .main::-webkit-scrollbar { width: 4px; }
+  .main::-webkit-scrollbar-track { background: transparent; }
+  .main::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .placeholder { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: var(--muted); }
+  .placeholder svg { opacity: 0.3; }
+  .placeholder p { font: 600 16px 'Barlow Condensed', sans-serif; letter-spacing: .3px; color: var(--text); }
+  .home-page { width: 100%; min-height: 100%; align-items: stretch; justify-content: center; padding: clamp(26px, 7vw, 88px) clamp(20px, 8vw, 120px); background: radial-gradient(circle at 85% 18%, rgba(23,74,156,.08), transparent 28%), #f4f6f9; }
+  .home-inner { width: 100%; max-width: 1040px; margin: 0 auto; }
+  .home-kicker { color: var(--away); font: 700 10px 'DM Mono', monospace; letter-spacing: 2px; text-transform: uppercase; }
+  .home-title { max-width: 680px; margin-top: 12px; color: var(--text); font: 700 clamp(42px, 6vw, 76px)/.9 'Barlow Condensed', sans-serif; letter-spacing: -.5px; text-transform: uppercase; }
+  .home-copy { max-width: 560px; margin-top: 18px; color: var(--muted); font-size: 14px; line-height: 1.7; }
+  .desk-summary { display:grid; grid-template-columns:1.2fr repeat(3,minmax(120px,.7fr)); gap:10px; margin-top:24px; }
+  .desk-card { border:1px solid var(--border); background:#fff; border-radius:6px; padding:14px; min-height:86px; }
+  .desk-card.is-hero { background:linear-gradient(120deg,#071d41,#123765); color:#fff; border:0; }
+  .desk-label { display:block; color:var(--muted); font:700 9px 'DM Mono', monospace; letter-spacing:1px; text-transform:uppercase; }
+  .desk-card.is-hero .desk-label { color:#b9d8ff; }
+  .desk-value { display:block; margin-top:7px; color:var(--text); font:800 30px/.9 'Barlow Condensed', sans-serif; }
+  .desk-card.is-hero .desk-value { color:#fff; }
+  .desk-note { display:block; margin-top:8px; color:var(--muted); font-size:11px; line-height:1.35; }
+  .desk-card.is-hero .desk-note { color:#d8e8ff; }
+  .home-controls { margin-top: 34px; padding: 0; background: transparent; border: 0; }
+  .home-controls-label { margin-bottom: 12px; color: var(--muted); font: 700 10px 'DM Mono', monospace; letter-spacing: 1.2px; text-transform: uppercase; }
+  .home-date-label { margin: -4px 0 11px; color: var(--text); font: 700 17px 'Barlow Condensed', sans-serif; letter-spacing: .2px; }
+  .home-date-nav { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .home-date-nav button { background: var(--away); border: 1px solid var(--away); color: #fff; border-radius: 4px; padding: 9px 14px; cursor: pointer; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .7px; }
+  .home-date-nav button:hover { background: #a80d27; }
+  .home-date-nav input[type="date"] { background: #f8fafc; border: 1px solid var(--border); color: var(--text); border-radius: 4px; padding: 9px 10px; font: 11px 'DM Mono', monospace; }
+  .home-controls .game-filters { grid-template-columns: minmax(0, 1.6fr) minmax(180px, 1fr); align-items: center; }
+  .home-controls #game-type-filter { grid-column: 1 / -1; }
+  .home-controls .filter-count { grid-column: 1 / -1; }
+  .home-fetch-status { min-height: 24px; margin-top: 12px; }
+  .home-fetch-status.error { padding: 12px 14px; border: 1px solid rgba(200,16,46,.24); background: #fff5f6; color: var(--red); font-size: 12px; line-height: 1.5; }
+  .home-fetch-status.empty { color: var(--muted); font-size: 12px; }
+  .home-fetch-status.error, .home-fetch-status.loading { animation: state-in .24s ease-out both; }
+  .home-fetch-status.loading { color: var(--muted); font: 10px 'DM Mono', monospace; letter-spacing: .7px; text-transform: uppercase; }
+  .home-fetch-retry { margin-top: 8px; border: 1px solid var(--red); border-radius: 4px; background: #fff; color: var(--red); padding: 6px 10px; cursor: pointer; font: 700 10px 'DM Mono', monospace; text-transform: uppercase; }
+  .home-fetch-retry:hover { background: var(--red); color: #fff; }
+  .team-carousel { margin-top: 16px; padding: 14px 0 4px; border-top: 1px solid var(--border); }
+  .team-carousel-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+  .team-carousel-title { color: var(--muted); font: 700 10px 'DM Mono', monospace; letter-spacing: 1px; text-transform: uppercase; }
+  .team-carousel-search { width: 210px; border: 1px solid var(--border); border-radius: 4px; background: #f8fafc; color: var(--text); padding: 7px 9px; font-size: 11px; }
+  .team-carousel-search::placeholder { color: #8a99ab; }
+  .team-carousel-viewport { position: relative; height: 196px; overflow: hidden; perspective: 1000px; }
+  .team-carousel-track { position: relative; width: 100%; height: 100%; transform-style: preserve-3d; }
+  .team-carousel-card { position: absolute; top: 12px; left: 50%; width: 164px; height: 166px; padding: 18px 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; border: 1px solid var(--border); border-radius: 8px; background: #fff; cursor: pointer; opacity: 0; pointer-events: none; transform: translateX(-50%) translateX(var(--x)) scale(var(--scale)) rotateY(var(--rotate)); transition: transform .55s cubic-bezier(.2,.75,.25,1), opacity .35s ease, box-shadow .25s ease, border-color .25s ease; }
+  .team-carousel-card.is-visible { pointer-events: auto; }
+  .team-carousel-card.is-active { border-color: var(--away); }
+  .team-carousel-card:hover { border-color: var(--home); }
+  .team-carousel-card:active { transform: translateX(-50%) translateX(var(--x)) scale(calc(var(--scale) * .97)) rotateY(var(--rotate)); }
+  .carousel-mark { width: 78px; height: 78px; border-width: 2px; }
+  .carousel-mark .team-mark-fallback { font-size: 18px; }
+  .team-carousel-name { color: var(--text); font: 700 20px/.95 'Barlow Condensed', sans-serif; text-align: center; }
+  .team-carousel-controls { position: absolute; inset: 0; display: flex; align-items: center; justify-content: space-between; pointer-events: none; }
+  .team-carousel-button { position: relative; z-index: 5; pointer-events: auto; border: 1px solid var(--border); border-radius: 4px; background: rgba(255,255,255,.94); color: var(--text); padding: 8px 9px; cursor: pointer; font: 700 9px 'DM Mono', monospace; text-transform: uppercase; letter-spacing: .5px; }
+  .team-carousel-button:hover { color: var(--away); border-color: var(--away); }
+  .team-catalog-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 8px; padding: 9px 11px; border: 1px solid var(--border); border-radius: 5px; background: rgba(255,255,255,.7); }
+  .team-catalog-note { color: var(--muted); font: 700 10px 'DM Mono', monospace; letter-spacing: .4px; text-transform: uppercase; }
+  .team-catalog-button { border: 1px solid var(--away); border-radius: 4px; background: var(--away); color: #fff; padding: 8px 10px; cursor: pointer; font: 700 10px 'DM Mono', monospace; letter-spacing: .4px; text-transform: uppercase; }
+  .team-catalog-button:hover { filter: brightness(.94); }
+  .team-catalog-button:disabled { opacity: .6; cursor: wait; }
+  .team-carousel-button:active, .home-date-nav button:active, .replay-btn-ctrl:active, .analyst-btn:active, .replay-card-btn:active { transform: translateY(1px) scale(.98); }
+  .home-stats { display: flex; gap: 28px; margin-top: 30px; padding-top: 18px; border-top: 1px solid var(--border); }
+  .home-stat-value { display: block; color: var(--text); font: 700 24px 'Barlow Condensed', sans-serif; }
+  .home-stat-label { display: block; margin-top: 3px; color: var(--muted); font: 9px 'DM Mono', monospace; letter-spacing: .7px; text-transform: uppercase; }
+  .trust-strip { margin-top:26px; padding:18px; border:1px solid var(--border); border-left:4px solid var(--away); background:#fff; border-radius:6px; }
+
+  /* ── Game detail ── */
+  .game-detail { padding: 26px clamp(18px, 4vw, 56px) 42px; display: flex; flex-direction: column; gap: 16px; max-width: 1180px; width: 100%; margin: 0 auto; }
+
+  /* Score header */
+  .score-header { background: linear-gradient(120deg, rgba(101,214,196,.08), transparent 46%), var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px 28px; position: relative; overflow: hidden; }
+  .score-header::before { content: 'CURRENT GAME STATE'; position: absolute; top: 12px; left: 14px; font: 9px 'DM Mono', monospace; letter-spacing: 1.6px; color: var(--muted); }
+  .score-row { display: flex; align-items: center; justify-content: space-between; }
+  .team-block { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 80px; }
+  .score-team-mark { width: 64px; height: 64px; margin-bottom: 8px; border-radius: 50%; background: rgba(255,255,255,.96); border: 3px solid rgba(255,255,255,.28); box-shadow: 0 4px 14px rgba(0,0,0,.18); }
+  .score-team-mark .team-mark-fallback { font-size: 14px; }
+  .team-abbr { font: 800 40px/.9 'Barlow Condensed', sans-serif; letter-spacing: 1px; }
+  .team-name { font: 10px 'DM Mono', monospace; color: var(--muted); text-transform: uppercase; letter-spacing: .8px; }
+  .score-center { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .score-display { font: 800 52px/.9 'DM Mono', monospace; font-variant-numeric: tabular-nums; letter-spacing: -4px; }
+  .score-sep { color: var(--muted); margin: 0 4px; }
+  .game-clock { font: 11px 'DM Mono', monospace; color: var(--accent); text-align: center; letter-spacing: .4px; }
+
+  /* Probability bar */
+  .prob-section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 20px; }
+  .prob-title { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; }
+  .prob-bar-wrap { display: flex; align-items: center; gap: 10px; }
+  .prob-team-label { font-weight: 700; font-size: 13px; min-width: 36px; text-align: center; }
+  .prob-bar { flex: 1; height: 30px; background: var(--border); border-radius: 1px; overflow: hidden; display: flex; border: 1px solid #ffffff12; }
+  .prob-bar-home { height: 100%; background: var(--home); border-radius: 0; display: flex; align-items: center; justify-content: flex-end; padding-right: 8px; font: 700 12px 'DM Mono', monospace; color: var(--ink); min-width: 30px; position: relative; overflow: hidden; }
+  .prob-bar-home::after { content: ''; position: absolute; inset: 0 auto 0 0; width: 42%; background: linear-gradient(100deg, transparent, rgba(255,255,255,.2), transparent); animation: bar-shimmer 3.8s ease-in-out infinite; }
+  .prob-bar-away { height: 100%; background: var(--away); flex: 1; border-radius: 0; display: flex; align-items: center; padding-left: 8px; font: 700 12px 'DM Mono', monospace; color: var(--ink); }
+  .prob-no-model { font-size: 12px; color: var(--muted); text-align: center; padding: 8px 0; }
+
+  /* Chart */
+  .chart-section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 20px; }
+  .chart-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .chart-title { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+  .quarter-tabs { display: flex; gap: 4px; }
+  .quarter-tab { background: transparent; border: 1px solid var(--border); color: var(--muted); border-radius: 4px; padding: 3px 9px; cursor: pointer; font-size: 11px; font-weight: 600; transition: all 0.15s; }
+  .quarter-tab:hover { border-color: var(--home); color: var(--text); }
+  .quarter-tab.active { background: var(--home); border-color: var(--home); color: white; }
+  .chart-svg-wrap { width: 100%; overflow-x: auto; }
+  svg.prob-chart { width: 100%; min-width: 360px; display: block; }
+  .chart-empty { text-align: center; color: var(--muted); padding: 40px 0; font-size: 13px; }
+  .chart-loading { text-align: center; color: var(--muted); padding: 40px 0; font-size: 13px; }
+  .live-workspace { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(360px, .95fr); gap: 14px; align-items: start; }
+  .live-workspace .chart-section, .live-workspace .pbp-section { min-height: 360px; }
+  .live-workspace .chart-section { padding: 14px 16px; }
+  .live-workspace .pbp-section { padding: 14px 16px; }
+  .live-workspace svg.prob-chart { min-width: 0; }
+  .live-workspace .pbp-list { max-height: 292px; }
+
+  /* Replay controls */
+  .replay-bar { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 16px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .replay-btn-ctrl { background: var(--surface2); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 5px 10px; cursor: pointer; font: 700 11px 'DM Mono', monospace; transition: background 0.15s, border-color .15s, transform .15s; }
+  .replay-btn-ctrl:hover { background: var(--border); }
+  .replay-btn-ctrl.active { background: var(--home); border-color: var(--home); color: white; }
+  .replay-slider { flex: 1; min-width: 120px; accent-color: var(--home); cursor: pointer; }
+  .replay-counter { font-size: 11px; color: var(--muted); min-width: 80px; font-variant-numeric: tabular-nums; }
+  .replay-speed { background: var(--surface2); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 4px 8px; font-size: 11px; cursor: pointer; }
+  .replay-label { font-size: 11px; font-weight: 700; color: var(--home); text-transform: uppercase; letter-spacing: 0.5px; }
+  .replay-card-btn { background: var(--home); border: none; color: white; border-radius: 4px; padding: 2px 8px; cursor: pointer; font-size: 10px; font-weight: 700; margin-top: 4px; }
+
+  /* Play by play */
+  .pbp-section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 20px; }
+  .pbp-title { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; }
+  .pbp-list { max-height: 400px; overflow-y: auto; overflow-x: hidden; }
+  .pbp-list::-webkit-scrollbar { width: 4px; }
+  .pbp-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  .pbp-event { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+  .pbp-event:last-child { border-bottom: none; }
+  .pbp-event.replay-current { background: rgba(59,130,246,0.08); border-radius: 4px; padding-left: 4px; }
+  .pbp-clock { color: var(--muted); min-width: 44px; font-variant-numeric: tabular-nums; flex-shrink: 0; }
+  .pbp-desc { flex: 1; color: var(--text); }
+  .pbp-score { color: var(--muted); font-variant-numeric: tabular-nums; min-width: 42px; text-align: right; flex-shrink: 0; }
+  .pbp-prob-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .pbp-predict-btn { display: inline-block; background: transparent; border: 1px solid var(--border); color: var(--muted); border-radius: 4px; padding: 5px 7px; min-width: 54px; min-height: 32px; cursor: pointer; font: 700 9px 'DM Mono', monospace; text-transform: uppercase; letter-spacing: .35px; flex-shrink: 0; transition: background .15s, border-color .15s, color .15s; }
+  .pbp-predict-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .pbp-predict-btn:disabled { display: inline-block; opacity: 0.3; cursor: not-allowed; }
+  .replay-btn-ctrl:hover { transform: translateY(-1px); border-color: var(--home); }
+  .pbp-empty { color: var(--muted); text-align: center; padding: 20px 0; font-size: 13px; }
+
+  /* Inline predict result */
+  .predict-result { background: rgba(99,102,241,0.06); border: 1px solid rgba(99,102,241,0.25); border-radius: 6px; padding: 12px 14px; margin: 4px 0 8px 0; font-size: 12px; }
+  .predict-result-headline { font-weight: 600; margin-bottom: 8px; line-height: 1.4; font-size: 13px; }
+  .predict-result-probs { display: flex; gap: 16px; margin-bottom: 8px; }
+  .predict-result-prob { display: flex; flex-direction: column; gap: 1px; }
+  .predict-result-prob-label { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+  .predict-result-prob-val { font-size: 18px; font-weight: 800; }
+  .predict-result-factors { margin-bottom: 8px; }
+  .predict-result-factor { color: var(--muted); margin-bottom: 2px; }
+  .predict-result-factor::before { content: "• "; color: var(--accent); }
+  .predict-result-reasoning { color: var(--muted); line-height: 1.5; border-top: 1px solid var(--border); padding-top: 8px; }
+
+  /* Analyst */
+  .analyst-section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 20px; }
+  .analyst-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .analyst-title { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+  .analyst-btn { background: var(--accent); border: none; color: white; border-radius: var(--radius); padding: 6px 14px; cursor: pointer; font-size: 12px; font-weight: 600; transition: opacity 0.15s; }
+  .analyst-btn:hover:not(:disabled) { opacity: 0.85; }
+  .analyst-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .analyst-output { display: none; }
+  .analyst-output.visible { display: block; }
+  .analyst-headline { font-size: 15px; font-weight: 600; margin-bottom: 12px; line-height: 1.4; }
+  .analyst-probs { display: flex; gap: 20px; margin-bottom: 12px; flex-wrap: wrap; }
+  .analyst-prob-item { display: flex; flex-direction: column; gap: 2px; }
+  .analyst-prob-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+  .analyst-prob-value { font-size: 22px; font-weight: 800; }
+  .analyst-prob-meta { font-size: 11px; color: var(--muted); }
+  .dir-higher { color: var(--green); }
+  .dir-lower { color: var(--red); }
+  .dir-accurate { color: var(--muted); }
+  .analyst-factors { margin-bottom: 12px; }
+  .analyst-factors-title { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+  .analyst-factor { display: flex; align-items: flex-start; gap: 6px; font-size: 12px; margin-bottom: 4px; }
+  .analyst-factor::before { content: "•"; color: var(--accent); flex-shrink: 0; }
+  .analyst-reasoning { font-size: 12px; color: var(--muted); line-height: 1.6; border-top: 1px solid var(--border); padding-top: 10px; }
+  .analyst-error { color: var(--red); font-size: 12px; padding: 8px; background: rgba(239,68,68,0.1); border-radius: 4px; }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 0.7s linear infinite; vertical-align: middle; margin-right: 6px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .pbp-hint { font-size: 11px; color: var(--muted); padding: 8px 0 2px 0; text-align: center; border-top: 1px solid var(--border); margin-top: 6px; }
+  .analyst-subsection-title { font-size: 10px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+  .analyst-subsection { margin-bottom: 4px; }
+  .analyst-divider { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
+  .analyst-play-ctx { font-size: 11px; color: var(--muted); margin-bottom: 10px; padding: 6px 8px; background: var(--surface2); border: 1px solid var(--border); border-radius: 4px; line-height: 1.4; }
+  .analyst-empty { font-size: 12px; color: var(--muted); text-align: center; padding: 12px 0; }
+  .product-insights { display:grid; grid-template-columns:1.15fr .85fr; gap:12px; }
+  .insight-card, .share-card, .model-proof-card { background:#fff; border:1px solid var(--border); border-radius:var(--radius); padding:14px; }
+  .insight-title, .share-title, .model-proof-title { color:var(--muted); font:800 9px 'DM Mono', monospace; letter-spacing:1px; text-transform:uppercase; }
+  .insight-main { margin-top:8px; font:800 25px/.95 'Barlow Condensed', sans-serif; color:var(--text); }
+  .insight-copy { margin-top:8px; color:var(--muted); font-size:12px; line-height:1.5; }
+  .swing-row { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-top:10px; padding-top:10px; border-top:1px solid var(--border); }
+  .swing-play { color:var(--text); font-size:12px; line-height:1.45; }
+  .swing-value { color:var(--away); font:800 22px 'Barlow Condensed', sans-serif; white-space:nowrap; }
+  .share-card { display:flex; flex-direction:column; gap:10px; }
+  .share-text { padding:10px; background:#f8fafc; border:1px solid var(--border); border-radius:4px; color:var(--text); font-size:12px; line-height:1.45; }
+  .share-actions { display:flex; gap:8px; flex-wrap:wrap; }
+  .share-btn { border:1px solid var(--home); background:#fff; color:var(--home); border-radius:4px; padding:8px 10px; cursor:pointer; font:800 10px 'DM Mono', monospace; text-transform:uppercase; letter-spacing:.5px; }
+  .share-btn:hover { background:var(--home); color:#fff; }
+  .model-proof-card { display:grid; grid-template-columns:1fr auto; gap:12px; align-items:center; }
+  .model-proof-card p { margin-top:6px; color:var(--muted); font-size:12px; line-height:1.5; }
+  .model-proof-pill { padding:8px 10px; border-radius:4px; background:#071d41; color:#fff; font:800 10px 'DM Mono', monospace; text-transform:uppercase; letter-spacing:.6px; white-space:nowrap; }
+  .loading-steps { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin-top:10px; }
+  .loading-step { padding:10px; background:#f8fafc; border:1px solid var(--border); border-radius:4px; color:var(--muted); font:700 10px 'DM Mono', monospace; text-transform:uppercase; letter-spacing:.55px; }
+  .skeleton-line { position:relative; overflow:hidden; display:block; height:9px; margin-top:9px; border-radius:3px; background:#e7ebf1; }
+
+  /* ── Broadcast-desk finish ── */
+  .chart-section, .pbp-section, .analyst-section, .replay-bar { background: rgba(18,25,33,.86); border-color: var(--border); border-radius: var(--radius); }
+  .chart-title, .pbp-title, .analyst-title, .prob-title { font: 600 10px 'DM Mono', monospace; letter-spacing: 1.4px; color: var(--muted); }
+  .quarter-tab, .replay-btn-ctrl, .replay-speed { border-radius: 2px; background: var(--surface3); font: 500 10px 'DM Mono', monospace; }
+  .quarter-tab.active, .replay-btn-ctrl.active { background: var(--accent); border-color: var(--accent); color: var(--ink); }
+  .analyst-btn { background: var(--accent); color: var(--ink); border-radius: 2px; font: 800 10px 'DM Mono', monospace; text-transform: uppercase; letter-spacing: .8px; }
+  .analyst-subsection-title { font: 600 9px 'DM Mono', monospace; letter-spacing: 1.4px; }
+  .replay-label { color: var(--accent); font: 600 10px 'DM Mono', monospace; letter-spacing: 1.2px; }
+  .replay-counter, .pbp-clock, .pbp-score { font-family: 'DM Mono', monospace; }
+  .replay-card-btn { background: var(--accent); color: var(--ink); border-radius: 2px; font: 700 9px 'DM Mono', monospace; letter-spacing: .4px; }
+  .prediction-mode { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: rgba(18,25,33,.72); }
+  .prediction-mode-label { color: var(--muted); font: 600 9px 'DM Mono', monospace; letter-spacing: 1.2px; text-transform: uppercase; }
+  .prediction-mode-options { display: flex; gap: 4px; }
+  .prediction-mode-btn { border: 1px solid var(--border); border-radius: 2px; background: var(--surface3); color: var(--muted); cursor: pointer; padding: 6px 10px; font: 500 10px 'DM Mono', monospace; }
+  .prediction-mode-btn:hover { color: var(--text); border-color: var(--home); }
+  .prediction-mode-btn.active { background: var(--home); border-color: var(--home); color: var(--ink); font-weight: 700; }
+  .prob-update { color: var(--muted); font: 9px 'DM Mono', monospace; letter-spacing: .8px; margin-top: 9px; text-align: right; text-transform: uppercase; }
+  .mode-chooser { margin: auto; max-width: 700px; width: 100%; padding: 34px; border: 1px solid var(--border); background: linear-gradient(135deg, rgba(101,214,196,.09), transparent 55%), var(--surface); }
+  .mode-chooser-kicker { color: var(--accent); font: 500 10px 'DM Mono', monospace; letter-spacing: 1.4px; text-transform: uppercase; }
+  .mode-chooser h2 { margin-top: 10px; font: 700 34px/.95 'Barlow Condensed', sans-serif; letter-spacing: .3px; }
+  .mode-chooser p { margin-top: 10px; color: var(--muted); font-size: 12px; }
+  .mode-chooser-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 26px; }
+  .mode-choice { min-height: 126px; padding: 16px; border: 1px solid var(--border); border-radius: 2px; background: var(--surface3); color: var(--text); text-align: left; cursor: pointer; }
+  .mode-choice:hover { border-color: var(--home); background: var(--surface2); transform: translateY(-2px); }
+  .mode-choice-title { display: block; color: var(--home); font: 700 20px/.95 'Barlow Condensed', sans-serif; letter-spacing: .5px; }
+  .mode-choice-copy { display: block; margin-top: 12px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+  .roster-intro { margin: auto; width: 100%; max-width: 1180px; min-height: 620px; background: #0a2949; color: #fff; box-shadow: 0 24px 70px rgba(7,29,65,.26); overflow: hidden; animation: roster-stage-in .48s cubic-bezier(.2,.8,.22,1) both; }
+  .roster-topbar { min-height: 96px; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 22px 28px; background: #071d41; border-bottom: 1px solid rgba(255,255,255,.1); }
+  .roster-kicker { color: #b9d8ff; font: 800 10px 'DM Mono', monospace; letter-spacing: 1.5px; text-transform: uppercase; }
+  .roster-topbar h2 { margin-top: 8px; font: 800 clamp(38px, 7vw, 72px)/.82 'Barlow Condensed', sans-serif; letter-spacing: .4px; text-transform: uppercase; }
+  .roster-loading { min-width: 190px; color: #d7e7fb; font: 800 10px 'DM Mono', monospace; letter-spacing: .75px; text-transform: uppercase; }
+  .roster-loading-line { display: block; height: 4px; margin-bottom: 9px; overflow: hidden; background: rgba(255,255,255,.16); }
+  .roster-loading-line::after { content: ''; display: block; width: 46%; height: 100%; background: #c8102e; animation: roster-load 1.3s ease-in-out infinite; }
+  .roster-load-btn { display: block; margin-top: 10px; border: 1px solid rgba(255,255,255,.34); background: rgba(255,255,255,.08); color: #fff; border-radius: 3px; padding: 7px 9px; cursor: pointer; font: 800 9px 'DM Mono', monospace; letter-spacing: .65px; text-transform: uppercase; }
+  .roster-load-btn:hover:not(:disabled) { background: #c8102e; border-color: #c8102e; }
+  .roster-load-btn:disabled { opacity: .62; cursor: not-allowed; }
+  .roster-stage { display: grid; grid-template-columns: 1fr 1fr; min-height: 524px; background: linear-gradient(90deg, #2f6ca5 0 50%, #123765 50% 100%); }
+  .roster-team-panel { position: relative; padding: 20px; overflow: hidden; }
+  .roster-team-panel.away { border-left: 1px solid rgba(255,255,255,.2); }
+  .roster-team-head { position: relative; z-index: 3; display: flex; align-items: center; gap: 10px; color: #d9eaff; }
+  .roster-team-head span { display: block; font: 800 9px 'DM Mono', monospace; letter-spacing: 1.2px; text-transform: uppercase; }
+  .roster-team-head strong { display: block; margin-top: 2px; color: #fff; font: 800 30px/.9 'Barlow Condensed', sans-serif; }
+  .roster-team-logo { width: 52px; height: 52px; background: rgba(255,255,255,.14); border-color: rgba(255,255,255,.22); }
+  .roster-pending { display: grid; place-items: center; min-height: 402px; color: rgba(255,255,255,.72); font: 800 10px 'DM Mono', monospace; letter-spacing: 1px; text-transform: uppercase; }
+  .roster-cards { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0; margin-top: 20px; min-height: 402px; }
+  .roster-player-card { position: relative; min-height: 402px; padding: 18px 10px 18px; overflow: hidden; border-left: 1px solid rgba(7,29,65,.55); animation: roster-card-rise .56s cubic-bezier(.18,.8,.24,1) both; animation-delay: var(--delay); }
+  .roster-player-card:first-child { border-left: 0; }
+  .roster-big-number { position: absolute; inset: 18px 0 auto 0; z-index: 0; color: rgba(7,29,65,.78); font: 800 clamp(82px, 8vw, 150px)/.78 'Barlow Condensed', sans-serif; letter-spacing: -5px; text-align: center; user-select: none; }
+  .roster-card-logo { position: absolute; top: 50%; left: 50%; z-index: 1; width: 86px; height: 86px; opacity: .22; transform: translate(-50%, -44%); background: rgba(255,255,255,.2); border-color: rgba(255,255,255,.2); }
+  .roster-player-img { position: absolute; z-index: 2; left: 50%; bottom: 74px; width: min(148px, 135%); max-height: 280px; object-fit: contain; transform: translateX(-50%); filter: drop-shadow(0 18px 22px rgba(3,16,33,.34)); }
+  .roster-player-img.is-hidden { display: none; }
+  .roster-player-meta { position: absolute; z-index: 4; left: 10px; right: 10px; bottom: 18px; display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: end; padding-top: 9px; border-top: 3px solid rgba(7,29,65,.72); }
+  .roster-player-number { color: #fff; font: 800 28px/.8 'Barlow Condensed', sans-serif; }
+  .roster-player-meta strong { display: block; color: #fff; font: 800 17px/.88 'Barlow Condensed', sans-serif; overflow: hidden; text-overflow: ellipsis; }
+  .roster-player-meta span:not(.roster-player-number) { display: block; margin-top: 5px; color: #d6e8fb; font: 800 8px 'DM Mono', monospace; letter-spacing: .3px; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  @keyframes roster-stage-in { from { opacity: 0; transform: translateY(12px) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
+  @keyframes roster-card-rise { from { opacity: 0; transform: translateY(22px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes roster-load { 0% { transform: translateX(-120%); } 100% { transform: translateX(240%); } }
+
+  .live-dot { background: var(--accent); box-shadow: 0 0 0 3px rgba(216,255,107,.12); }
+  .status-live { background: rgba(143,227,136,.13); color: var(--green); }
+  .status-final { background: rgba(255,255,255,.06); color: var(--muted); }
+  .status-scheduled { background: rgba(101,214,196,.12); color: var(--home); }
+  code { color: var(--accent); font-family: 'DM Mono', monospace; font-size: .9em; }
+  @media (max-width: 760px) {
+    body { overflow: auto; min-height: 100vh; height: auto; }
+    header { padding: 13px 16px; }
+    header::before { display: none; }
+    .date-nav { gap: 5px; }
+    .layout { min-height: calc(100vh - 62px); overflow: visible; }
+    .game-slate .game-list { display: flex; gap: 8px; overflow-x: auto; padding: 10px 0 12px; }
+    .game-slate .game-card { min-width: 224px; margin-bottom: 0; }
+    .main { overflow: visible; }
+    .home-page { padding: 42px 18px 54px; align-items: flex-start; }
+    .home-title { font-size: 52px; }
+    .desk-summary, .live-workspace { grid-template-columns: 1fr; }
+    .model-proof-card { align-items:flex-start; flex-direction:column; display:flex; }
+    .home-controls .game-filters { grid-template-columns: 1fr; }
+    .home-controls .filter-count { grid-column: auto; }
+    .team-carousel-heading { align-items: stretch; flex-direction: column; }
+    .team-carousel-search { width: 100%; }
+    .team-carousel-card { width: 142px; }
+    .home-stats { gap: 16px; flex-wrap: wrap; }
+    .game-detail { padding: 18px 12px 30px; }
+    .score-header { padding: 24px 14px 18px; }
+    .team-abbr { font-size: 32px; }
+    .score-display { font-size: 38px; }
+    .prob-bar-wrap { gap: 6px; }
+    .prob-team-label { font-size: 11px; min-width: 30px; }
+    .prediction-mode { align-items: flex-start; flex-direction: column; }
+    .mode-chooser { padding: 24px 18px; }
+    .mode-chooser-options { grid-template-columns: 1fr; }
+    .roster-intro { min-height: auto; }
+    .roster-topbar { align-items: flex-start; flex-direction: column; padding: 20px; }
+    .roster-stage { grid-template-columns: 1fr; }
+    .roster-team-panel.away { border-left: 0; border-top: 1px solid rgba(255,255,255,.2); }
+    .roster-cards { display: flex; gap: 10px; overflow-x: auto; min-height: 360px; padding-bottom: 6px; }
+    .roster-player-card { min-width: 210px; min-height: 340px; border: 1px solid rgba(7,29,65,.38); }
+    .roster-player-img { max-height: 245px; bottom: 72px; }
+    .roster-big-number { font-size: 140px; }
+    .live-workspace .chart-section, .live-workspace .pbp-section { min-height: auto; }
+    .live-workspace .pbp-list { max-height: 360px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: .01ms !important; }
+  }
+  @media (pointer: coarse) {
+    .home-date-nav button, .home-date-nav input, .game-type-filter, .team-carousel-search,
+    .team-carousel-button, .quarter-tab, .replay-btn-ctrl, .replay-speed, .analyst-btn,
+    .prediction-mode-btn, .replay-card-btn, .pbp-predict-btn { min-height: 44px; }
+    .team-carousel-button { padding-inline: 12px; }
+  }
+
+  /* ── Clean NBA broadcast theme ── */
+  header { background: #071d41; border-bottom: 0; }
+  header::after { width: 100%; height: 4px; background: #c8102e; }
+  header h1 { color: #fff; letter-spacing: 1px; }
+  header h1 span { color: #b9d8ff; }
+  header::before { color: #9eb6d6; }
+  .date-nav button { background: #c8102e; border-color: #c8102e; }
+  .date-nav button:hover { background: #a80d27; }
+  .date-nav input[type="date"] { background: #102f5d; border-color: #42638f; color: #fff; }
+  .date-nav input[type="date"]::-webkit-calendar-picker-indicator { filter: none; }
+  .sidebar { background: #fff; }
+  .sidebar-header { background: #f8fafc; }
+  .game-card { background: #fff; }
+  .game-card:hover { background: #f7faff; transform: translateY(-1px); }
+  .game-card.selected { border-color: var(--home); background: #edf4ff; box-shadow: inset 4px 0 0 var(--home), 0 2px 8px rgba(23,74,156,.1); }
+  .game-card.live-card { border-color: #b9dfce; }
+  .status-live { background: #e4f5ed; color: var(--green); }
+  .status-final { background: #eef1f5; color: var(--muted); }
+  .status-scheduled { background: #edf4ff; color: var(--home); }
+  .live-dot { background: var(--green); }
+  .main { background: #f4f6f9; }
+  .game-detail { gap: 18px; }
+  .score-header { background: linear-gradient(120deg, #123765, #071d41); border: 0; }
+  .score-header::before { color: #9eb6d6; }
+  .score-sep { color: #9eb6d6; }
+  .game-clock { color: #b9d8ff; }
+  .prob-section, .chart-section, .pbp-section, .analyst-section, .replay-bar { background: #fff; }
+  .prob-bar { background: #e7ebf1; border-color: #d8e0ea; }
+  .prob-bar-home { background: var(--home); color: #fff; }
+  .prob-bar-away { background: var(--away); color: #fff; }
+  .prediction-mode { background: #fff; }
+  .prediction-mode-btn.active, .quarter-tab.active, .replay-btn-ctrl.active { background: var(--home); border-color: var(--home); color: #fff; }
+  .analyst-btn, .mode-choice:hover { background: var(--away); border-color: var(--away); }
+  .analyst-btn { color: #fff; }
+  .mode-chooser { background: linear-gradient(135deg, #123765, #071d41); border: 0; color: #fff; }
+  .mode-chooser p, .mode-choice-copy { color: #b9c9dc; }
+  .mode-choice { background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.22); color: #fff; }
+  .mode-choice-title { color: #fff; }
+  .mode-choice:hover { color: #fff; }
+  .replay-btn-ctrl, .replay-speed { background: #f8fafc; }
+  .replay-slider { accent-color: var(--away); }
+  .prob-update { color: var(--home); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand-lockup">
+    <div class="nba-logo-shell">
+      <img class="nba-logo" src="https://cdn.nba.com/logos/leagues/logo-nba.svg" alt="NBA" onerror="this.remove()">
+      <span class="nba-logo-fallback">NBA</span>
+    </div>
+    <h1>NBA <span>Win Probability</span></h1>
+  </div>
+  <nav class="header-nav" aria-label="Primary navigation">
+    <a class="header-nav-link is-primary" href="/">Games</a>
+    <a class="header-nav-link" id="rd-link" href="rd.html">R&amp;D</a>
+  </nav>
+</header>
+
+<div class="layout no-slate" id="app-layout">
+  <main class="main" id="main-content">
+    <div class="placeholder home-page" id="placeholder">
+      <div class="home-inner">
+        <div class="home-kicker">NBA Win Probability Desk</div>
+        <h2 class="home-title">Find the game.<br>Read the moment.</h2>
+        <p class="home-copy">Choose a date, narrow the slate by team or competition, then open a game for live prediction, opening analysis, or replay.</p>
+        <section class="desk-summary" id="desk-summary" aria-label="Slate summary">
+          <div class="desk-card is-hero">
+            <span class="desk-label">Model desk</span>
+            <span class="desk-value" id="desk-main-value">Loading slate</span>
+            <span class="desk-note" id="desk-main-note">Checking NBA games and model-ready replay data.</span>
+          </div>
+          <div class="desk-card">
+            <span class="desk-label">Games</span>
+            <span class="desk-value" id="desk-games-value">0</span>
+            <span class="desk-note">On selected date</span>
+          </div>
+          <div class="desk-card">
+            <span class="desk-label">Live</span>
+            <span class="desk-value" id="desk-live-value">0</span>
+            <span class="desk-note">Updating now</span>
+          </div>
+          <div class="desk-card">
+            <span class="desk-label">Product signal</span>
+            <span class="desk-value">.164</span>
+            <span class="desk-note">Raw model Brier</span>
+          </div>
+        </section>
+        <div class="home-controls">
+          <div class="home-controls-label">Game finder</div>
+          <div class="home-date-label" id="home-date-label"></div>
+          <div class="home-date-nav">
+            <button id="btn-today">Today</button>
+            <input type="date" id="date-input" aria-label="Choose game date">
+          </div>
+          <div class="game-filters" aria-label="Game filters">
+            <select class="game-type-filter" id="game-type-filter" aria-label="Filter by game type">
+              <option value="all">All game types</option>
+              <option value="regular">Regular season</option>
+              <option value="playoffs">Playoffs</option>
+              <option value="preseason">Preseason</option>
+              <option value="nba_cup">NBA Cup</option>
+            </select>
+            <div class="filter-count" id="filter-count"></div>
+          </div>
+        </div>
+        <div class="team-carousel" aria-label="Choose a team">
+          <div class="team-carousel-heading">
+            <div class="team-carousel-title">Choose a team</div>
+            <input class="team-carousel-search" id="team-carousel-search" type="search" placeholder="Type a team to spin there" aria-label="Find a team">
+          </div>
+          <div class="team-carousel-viewport">
+            <div class="team-carousel-track" id="team-carousel-track"></div>
+            <div class="team-carousel-controls">
+              <button class="team-carousel-button" id="team-carousel-prev" type="button">Previous</button>
+              <button class="team-carousel-button" id="team-carousel-next" type="button">Next</button>
+            </div>
+          </div>
+          <div class="team-catalog-bar" id="team-catalog-bar" hidden>
+            <span class="team-catalog-note" id="team-catalog-note">Browse a team’s full schedule</span>
+            <button class="team-catalog-button" id="team-catalog-button" type="button">Browse team schedule</button>
+          </div>
+        </div>
+        <section class="game-slate" id="game-slate" aria-label="Available games">
+          <div class="sidebar-header"><div class="sidebar-count" id="sidebar-count"></div></div>
+          <div class="game-list" id="game-list">
+            <div style="padding:20px;text-align:center;color:var(--muted)">Loading games…</div>
+          </div>
+        </section>
+        <div class="home-fetch-status" id="home-fetch-status" aria-live="polite"></div>
+        <div class="home-stats">
+          <div><span class="home-stat-value">Live</span><span class="home-stat-label">Play-by-play updates</span></div>
+          <div><span class="home-stat-value">Pre-tip</span><span class="home-stat-label">Opening probability</span></div>
+          <div><span class="home-stat-value">Replay</span><span class="home-stat-label">Every possession</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="game-detail" id="game-detail" style="display:none"></div>
+  </main>
+</div>
+
+<script src="config.js"></script>
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+// Vercel serves this as static HTML while Hugging Face serves the API.
+// Local FastAPI stays same-origin; file:// demos still point at localhost.
+function resolveApiBase() {
+  const configBase = window.NBA_WINPROB_CONFIG?.apiBase;
+  if (typeof configBase === 'string' && configBase.trim()) {
+    return configBase.trim().replace(/\/+$/, '');
+  }
+  if (window.location.protocol === 'file:') return 'http://127.0.0.1:8765';
+  return '';
+}
+const API_BASE = resolveApiBase();
+const requestedDate = new URLSearchParams(window.location.search).get('date');
+const initialDate = /^\d{4}-\d{2}-\d{2}$/.test(requestedDate || '') ? requestedDate : new Date().toISOString().slice(0,10);
+const state = {
+  date: initialDate,
+  games: [],
+  teamFilter: 'all',
+  gameType: 'all',
+  catalogTeam: null,
+  catalogGames: [],
+  teamCarouselIndex: 0,
+  selectedGame: null,
+  events: [],
+  liveStream: null,
+  quarterFilter: 'all',
+  predictionMode: 'live', // Final games: opening baseline or in-game snapshot
+  analystOutput: null,
+  featureContext: null,
+  openingContext: null,
+  lastLiveUpdate: null,
+  liveReconnects: 0,
+  historyRequests: {},
+  playerRequests: {},
+  players: null,
+  // Replay
+  replayMode: false,
+  replayIndex: 0,      // how many events are currently "visible"
+  replayTimer: null,
+  replaySpeed: 500,    // ms per step
+  predictCache: {},    // event_num → analyst result
+  analystRequests: {}, // game/event key → in-flight request
+};
+
+function syncRDLink() {
+  const link = document.getElementById('rd-link');
+  if (link) link.href = `rd.html?date=${encodeURIComponent(state.date)}`;
+}
+
+function escapeHTML(value) {
+  return String(value ?? '').replace(/[&<>'"]/g, char => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+  }[char]));
+}
+
+// ── Init ───────────────────────────────────────────────────────────────────
+document.getElementById('date-input').value = state.date;
+syncRDLink();
+document.getElementById('date-input').addEventListener('change', e => {
+  state.date = e.target.value;
+  state.catalogTeam = null;
+  state.catalogGames = [];
+  syncRDLink();
+  showHome();
+  loadScoreboard(state.date);
+});
+document.getElementById('btn-today').addEventListener('click', () => {
+  state.date = new Date().toISOString().slice(0,10);
+  state.catalogTeam = null;
+  state.catalogGames = [];
+  document.getElementById('date-input').value = state.date;
+  syncRDLink();
+  showHome();
+  loadScoreboard(state.date);
+});
+document.getElementById('team-carousel-prev').addEventListener('click', () => moveTeamCarousel(-1));
+document.getElementById('team-carousel-next').addEventListener('click', () => moveTeamCarousel(1));
+document.getElementById('team-carousel-search').addEventListener('input', e => {
+  const query = e.target.value.trim().toLowerCase();
+  if (!query) return chooseTeam('all');
+  const match = TEAM_DIRECTORY.find(team => `${team.name} ${team.code}`.toLowerCase().includes(query));
+  if (match) chooseTeam(match.code);
+});
+document.getElementById('game-type-filter').addEventListener('change', e => {
+  state.gameType = e.target.value;
+  renderGameList();
+});
+document.getElementById('team-catalog-button').addEventListener('click', () => {
+  if (state.teamFilter !== 'all') loadTeamCatalog(state.teamFilter);
+});
+
+function showHome() {
+  _resetReplay();
+  if (state.liveStream) { state.liveStream.close(); state.liveStream = null; }
+  state.selectedGame = null;
+  state.events = [];
+  state.players = null;
+  state.featureContext = null;
+  state.openingContext = null;
+  state.catalogTeam = null;
+  state.catalogGames = [];
+  updateTeamCatalogBar();
+  document.getElementById('placeholder').style.display = 'flex';
+  document.getElementById('game-detail').style.display = 'none';
+}
+
+loadScoreboard(state.date);
+setInterval(() => {
+  if (state.selectedGame?.status !== 'Live' || !state.lastLiveUpdate) return;
+  const age = Date.now() - state.lastLiveUpdate;
+  if (age > 30000) {
+    const freshText = document.getElementById('freshness-text');
+    const freshDot = document.getElementById('freshness-dot');
+    if (freshText) freshText.textContent = `No new play for ${Math.round(age / 1000)}s · checking feed`;
+    if (freshDot) freshDot.classList.add('stale');
+  }
+}, 5000);
+
+// ── Scoreboard ─────────────────────────────────────────────────────────────
+async function loadScoreboard(date) {
+  state.catalogTeam = null;
+  state.catalogGames = [];
+  updateTeamCatalogBar();
+  setSlateVisibility(false);
+  const dateLabel = document.getElementById('home-date-label');
+  if (dateLabel) dateLabel.textContent = formatDate(date);
+  const homeStatus = document.getElementById('home-fetch-status');
+  if (homeStatus) {
+    homeStatus.className = 'home-fetch-status loading';
+    homeStatus.textContent = `Loading games for ${formatDate(date)}...`;
+  }
+  document.getElementById('game-list').innerHTML = '';
+  renderGameSkeletons();
+  updateDeskSummary([], true);
+
+  try {
+    const ttlMs = date < new Date().toISOString().slice(0,10) ? 86400000 : 45000;
+    const data = await cachedJSON(`scoreboard:${date}`, `${API_BASE}/api/scoreboard?date=${date}`, ttlMs);
+    state.games = data.games || [];
+    updateDeskSummary(state.games);
+    if (homeStatus) {
+      homeStatus.className = 'home-fetch-status';
+      homeStatus.textContent = state.games.length ? `${state.games.length} games loaded` : 'No games scheduled for this date';
+    }
+    renderGameList();
+  } catch (err) {
+    let msg = err.message;
+    try { msg = JSON.parse(msg).detail ?? msg; } catch (_) {}
+    if (msg.toLowerCase().includes('timed out') || msg.toLowerCase().includes('timeout')) {
+      msg = 'stats.nba.com timed out';
+    }
+    document.getElementById('game-list').innerHTML = '';
+    updateDeskSummary([], false, 'Slate unavailable');
+    setSlateVisibility(false);
+    if (homeStatus) {
+      homeStatus.className = 'home-fetch-status error';
+      homeStatus.innerHTML = `<strong>Game list unavailable</strong><br>Failed to fetch: ${escapeHTML(msg)}<br><button class="home-fetch-retry">Retry game fetch</button>`;
+      homeStatus.querySelector('.home-fetch-retry')?.addEventListener('click', () => loadScoreboard(state.date));
+    }
+  }
+}
+
+async function cachedJSON(key, url, ttlMs = 300000) {
+  const storageKey = `nba-winprob:${key}`;
+  try {
+    const cached = JSON.parse(sessionStorage.getItem(storageKey) || 'null');
+    if (cached && Date.now() - cached.t < ttlMs) return cached.v;
+  } catch (_) {}
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(await resp.text());
+  const value = await resp.json();
+  try { sessionStorage.setItem(storageKey, JSON.stringify({t: Date.now(), v: value})); } catch (_) {}
+  return value;
+}
+
+function cachedValue(key) {
+  try {
+    const cached = JSON.parse(sessionStorage.getItem(`nba-winprob:${key}`) || 'null');
+    return cached?.v || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function cacheValue(key, value) {
+  try {
+    sessionStorage.setItem(`nba-winprob:${key}`, JSON.stringify({t: Date.now(), v: value}));
+  } catch (_) {}
+}
+
+function renderGameSkeletons() {
+  const el = document.getElementById('game-list');
+  if (!el) return;
+  el.innerHTML = Array.from({length: 4}).map(() => `
+    <div class="game-card-skeleton">
+      <span class="skeleton-line" style="width:72%;margin:14px 12px 0"></span>
+      <span class="skeleton-line" style="width:44%;margin-left:12px"></span>
+      <span class="skeleton-line" style="width:88%;margin-left:12px"></span>
+    </div>`).join('');
+  setSlateVisibility(true);
+}
+
+function updateDeskSummary(games = state.games, loading = false, error = '') {
+  const mainValue = document.getElementById('desk-main-value');
+  const mainNote = document.getElementById('desk-main-note');
+  const gamesValue = document.getElementById('desk-games-value');
+  const liveValue = document.getElementById('desk-live-value');
+  const liveCount = games.filter(g => g.status === 'Live').length;
+  if (gamesValue) gamesValue.textContent = loading ? '...' : String(games.length);
+  if (liveValue) liveValue.textContent = loading ? '...' : String(liveCount);
+  if (!mainValue || !mainNote) return;
+  if (error) {
+    mainValue.textContent = error;
+    mainNote.textContent = 'Try another date or retry the game fetch.';
+    return;
+  }
+  if (loading) {
+    mainValue.textContent = 'Loading slate';
+    mainNote.textContent = 'Fetching games and preparing the prediction desk.';
+    return;
+  }
+  if (!games.length) {
+    mainValue.textContent = 'No games found';
+    mainNote.textContent = 'Try today, all teams, or a different date.';
+    return;
+  }
+  const finalCount = games.filter(g => g.status === 'Final').length;
+  const scheduledCount = games.filter(g => g.status === 'Scheduled').length;
+  mainValue.textContent = `${games.length} games available`;
+  mainNote.textContent = `${liveCount} live, ${finalCount} final, ${scheduledCount} upcoming on ${formatDate(state.date)}.`;
+}
+
+function renderGameList() {
+  const el = document.getElementById('game-list');
+  const sourceGames = state.catalogTeam ? state.catalogGames : state.games;
+  if (!sourceGames.length) {
+    setSlateVisibility(false);
+    el.innerHTML = '';
+    const sidebarCount = document.getElementById('sidebar-count');
+    if (sidebarCount) sidebarCount.textContent = '';
+    const homeStatus = document.getElementById('home-fetch-status');
+    if (homeStatus) {
+      homeStatus.className = 'home-fetch-status empty';
+      homeStatus.innerHTML = emptyStateHTML(state.catalogTeam ? 'No games found for this team' : 'No games found for this date');
+      wireEmptyStateActions(homeStatus);
+    }
+    return;
+  }
+  const filtered = sourceGames.filter(g => {
+    const matchesTeam = state.teamFilter === 'all' || g.home_team === state.teamFilter || g.away_team === state.teamFilter;
+    const matchesType = state.gameType === 'all' || g.game_type === state.gameType;
+    return matchesTeam && matchesType;
+  });
+  const countEl = document.getElementById('filter-count');
+  if (countEl) countEl.textContent = state.catalogTeam
+    ? `${filtered.length} games in team catalog`
+    : `${filtered.length} of ${state.games.length} games`;
+  const homeStatus = document.getElementById('home-fetch-status');
+  const sidebarCount = document.getElementById('sidebar-count');
+  if (homeStatus && filtered.length) {
+    homeStatus.className = 'home-fetch-status';
+    homeStatus.textContent = '';
+  }
+  if (sidebarCount) {
+    sidebarCount.textContent = filtered.length ? `${filtered.length} ${state.catalogTeam ? 'team games' : 'games available'}` : '';
+  }
+  if (!filtered.length) {
+    setSlateVisibility(false);
+    el.innerHTML = '';
+    const sidebarCount = document.getElementById('sidebar-count');
+    if (sidebarCount) sidebarCount.textContent = '';
+    if (homeStatus) {
+      homeStatus.className = 'home-fetch-status empty';
+      homeStatus.innerHTML = emptyStateHTML(state.catalogTeam ? 'No team games match the selected filters' : 'No games match the selected filters');
+      wireEmptyStateActions(homeStatus);
+    }
+    return;
+  }
+  setSlateVisibility(true);
+  el.innerHTML = filtered.map(g => gameCardHTML(g)).join('');
+  el.querySelectorAll('.game-card').forEach(card => {
+    card.addEventListener('click', () => selectGame(card.dataset.gameId));
+  });
+  el.querySelectorAll('.replay-card-btn').forEach(button => {
+    button.addEventListener('click', event => {
+      event.stopPropagation();
+      selectGameReplay(button.dataset.gameId);
+    });
+  });
+}
+
+function setSlateVisibility(hasGames) {
+  document.getElementById('app-layout')?.classList.toggle('no-slate', !hasGames);
+}
+
+function gameCardHTML(g) {
+  const isLive = g.status === 'Live';
+  const isFinal = g.status === 'Final';
+  const isSelected = state.selectedGame?.game_id === g.game_id;
+  const badgeClass = isLive ? 'status-live' : isFinal ? 'status-final' : 'status-scheduled';
+  const score = (g.status === 'Scheduled') ? 'vs' : `${g.home_score} – ${g.away_score}`;
+  const periodInfo = isLive ? `<span style="font-size:11px;color:var(--muted)">${escapeHTML(periodLabel(g.period))} ${escapeHTML(g.clock)}</span>` : '';
+  const edgeLabel = isLive ? 'Live model ready' : isFinal ? 'Replay model ready' : 'Opening read ready';
+  const edgeWidth = isLive ? '76%' : isFinal ? '62%' : '48%';
+
+  return `
+    <div class="game-card${isLive ? ' live-card' : ''}${isSelected ? ' selected' : ''}" data-game-id="${escapeHTML(g.game_id)}">
+      <div class="game-matchup">
+        <div class="game-teams">
+          ${isLive ? '<div class="live-dot"></div>' : ''}
+          ${teamMark(g.home_team)}<span>${escapeHTML(g.home_team)}</span>
+          <span style="color:var(--muted);font-weight:400">vs</span>
+          ${teamMark(g.away_team)}<span>${escapeHTML(g.away_team)}</span>
+        </div>
+        <span class="game-score">${score}</span>
+      </div>
+      <div class="game-meta">
+        <span class="status-badge ${badgeClass}">${escapeHTML(g.status_text || g.status)}</span>
+        <span class="game-type-label">${escapeHTML(g.game_type_label || '')}</span>
+        ${periodInfo}
+        ${isFinal ? `<button class="replay-card-btn" data-game-id="${escapeHTML(g.game_id)}">Replay</button>` : ''}
+      </div>
+      <div class="game-edge">
+        <div class="game-edge-bar"><div class="game-edge-fill" style="--edge:${edgeWidth}"></div></div>
+        <span>${edgeLabel}</span>
+      </div>
+    </div>`;
+}
+
+function emptyStateHTML(message) {
+  return `
+    <strong>${escapeHTML(message)}</strong><br>
+    <span>Try All teams or another date.</span><br>
+    <button class="home-fetch-retry" data-action="clear-filters">Clear filters</button>`;
+}
+
+function wireEmptyStateActions(root) {
+  root.querySelector('[data-action="clear-filters"]')?.addEventListener('click', () => {
+    state.teamFilter = 'all';
+    state.gameType = 'all';
+    const type = document.getElementById('game-type-filter');
+    const search = document.getElementById('team-carousel-search');
+    if (type) type.value = 'all';
+    if (search) search.value = '';
+    chooseTeam('all');
+  });
+}
+
+const NBA_TEAM_IDS = {
+  ATL: '1610612737', BOS: '1610612738', CLE: '1610612739', NOP: '1610612740',
+  CHI: '1610612741', DAL: '1610612742', DEN: '1610612743', GSW: '1610612744',
+  HOU: '1610612745', LAC: '1610612746', LAL: '1610612747', MIA: '1610612748',
+  MIL: '1610612749', MIN: '1610612750', BKN: '1610612751', NYK: '1610612752',
+  ORL: '1610612753', IND: '1610612754', PHI: '1610612755', PHX: '1610612756',
+  POR: '1610612757', SAC: '1610612758', SAS: '1610612759', OKC: '1610612760',
+  TOR: '1610612761', UTA: '1610612762', MEM: '1610612763', WAS: '1610612764',
+  DET: '1610612765', CHA: '1610612766'
+};
+
+function teamMark(abbr, extraClass = '') {
+  const code = String(abbr || '').toUpperCase();
+  const teamId = NBA_TEAM_IDS[code];
+  const logo = teamId
+    ? `<img loading="lazy" decoding="async" src="https://cdn.nba.com/logos/nba/${teamId}/primary/L/logo.svg" alt="" onerror="this.remove()">`
+    : '';
+  const safeCode = escapeHTML(code);
+  const fallback = teamId ? '' : `<span class="team-mark-fallback">${safeCode}</span>`;
+  return `<span class="team-mark ${escapeHTML(extraClass)}" aria-label="${safeCode} logo">${fallback}${logo}</span>`;
+}
+
+const TEAM_DIRECTORY = [
+  { code: 'ALL', name: 'All teams' },
+  { code: 'ATL', name: 'Atlanta Hawks' }, { code: 'BOS', name: 'Boston Celtics' },
+  { code: 'BKN', name: 'Brooklyn Nets' }, { code: 'CHA', name: 'Charlotte Hornets' },
+  { code: 'CHI', name: 'Chicago Bulls' }, { code: 'CLE', name: 'Cleveland Cavaliers' },
+  { code: 'DAL', name: 'Dallas Mavericks' }, { code: 'DEN', name: 'Denver Nuggets' },
+  { code: 'DET', name: 'Detroit Pistons' }, { code: 'GSW', name: 'Golden State Warriors' },
+  { code: 'HOU', name: 'Houston Rockets' }, { code: 'IND', name: 'Indiana Pacers' },
+  { code: 'LAC', name: 'LA Clippers' }, { code: 'LAL', name: 'Los Angeles Lakers' },
+  { code: 'MEM', name: 'Memphis Grizzlies' }, { code: 'MIA', name: 'Miami Heat' },
+  { code: 'MIL', name: 'Milwaukee Bucks' }, { code: 'MIN', name: 'Minnesota Timberwolves' },
+  { code: 'NOP', name: 'New Orleans Pelicans' }, { code: 'NYK', name: 'New York Knicks' },
+  { code: 'OKC', name: 'Oklahoma City Thunder' }, { code: 'ORL', name: 'Orlando Magic' },
+  { code: 'PHI', name: 'Philadelphia 76ers' }, { code: 'PHX', name: 'Phoenix Suns' },
+  { code: 'POR', name: 'Portland Trail Blazers' }, { code: 'SAC', name: 'Sacramento Kings' },
+  { code: 'SAS', name: 'San Antonio Spurs' }, { code: 'TOR', name: 'Toronto Raptors' },
+  { code: 'UTA', name: 'Utah Jazz' }, { code: 'WAS', name: 'Washington Wizards' }
+];
+
+function renderTeamCarousel() {
+  const track = document.getElementById('team-carousel-track');
+  if (!track) return;
+  track.innerHTML = TEAM_DIRECTORY.map((team, index) => `
+    <div class="team-carousel-card" data-team-index="${index}" data-team-code="${team.code}" role="button" tabindex="0">
+      ${teamMark(team.code === 'ALL' ? 'NBA' : team.code, 'carousel-mark')}
+      <div class="team-carousel-name">${team.name}</div>
+    </div>`).join('');
+  track.querySelectorAll('.team-carousel-card').forEach(card => {
+    card.addEventListener('click', () => chooseTeam(card.dataset.teamCode));
+    card.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); chooseTeam(card.dataset.teamCode); }
+    });
+  });
+  updateTeamCarousel();
+}
+
+function updateTeamCarousel() {
+  const cards = document.querySelectorAll('.team-carousel-card');
+  const total = TEAM_DIRECTORY.length;
+  cards.forEach((card, index) => {
+    let offset = index - state.teamCarouselIndex;
+    if (offset > total / 2) offset -= total;
+    if (offset < -total / 2) offset += total;
+    const visible = Math.abs(offset) <= 2;
+    card.style.setProperty('--x', `${offset * 132}px`);
+    card.style.setProperty('--scale', offset === 0 ? '1' : Math.abs(offset) === 1 ? '.83' : '.68');
+    card.style.setProperty('--rotate', `${offset * -18}deg`);
+    card.style.opacity = visible ? (offset === 0 ? '1' : '.5') : '0';
+    card.style.zIndex = String(10 - Math.abs(offset));
+    card.classList.toggle('is-visible', visible);
+    card.classList.toggle('is-active', offset === 0);
+    card.setAttribute('aria-hidden', String(!visible));
+  });
+}
+
+function chooseTeam(code) {
+  const normalized = code === 'ALL' || code === 'all' ? 'all' : code;
+  if (state.catalogTeam !== normalized) {
+    state.catalogTeam = null;
+    state.catalogGames = [];
+  }
+  const index = TEAM_DIRECTORY.findIndex(team => team.code === (normalized === 'all' ? 'ALL' : normalized));
+  state.teamFilter = normalized;
+  if (index >= 0) state.teamCarouselIndex = index;
+  updateTeamCarousel();
+  updateTeamCatalogBar();
+  renderGameList();
+}
+
+function moveTeamCarousel(step) {
+  state.teamCarouselIndex = (state.teamCarouselIndex + step + TEAM_DIRECTORY.length) % TEAM_DIRECTORY.length;
+  const team = TEAM_DIRECTORY[state.teamCarouselIndex];
+  state.teamFilter = team.code === 'ALL' ? 'all' : team.code;
+  state.catalogTeam = null;
+  state.catalogGames = [];
+  const search = document.getElementById('team-carousel-search');
+  if (search) search.value = '';
+  updateTeamCarousel();
+  updateTeamCatalogBar();
+  renderGameList();
+}
+
+function updateTeamCatalogBar() {
+  const bar = document.getElementById('team-catalog-bar');
+  const note = document.getElementById('team-catalog-note');
+  const button = document.getElementById('team-catalog-button');
+  if (!bar || !note || !button) return;
+  const team = TEAM_DIRECTORY.find(item => item.code === state.teamFilter);
+  bar.hidden = !team;
+  if (!team) return;
+  note.textContent = state.catalogTeam === team.code
+    ? `${team.name} · full season schedule`
+    : `${team.name} · ${formatDate(state.date)} only`;
+  button.textContent = state.catalogTeam === team.code ? 'Reload schedule' : 'Browse team schedule';
+  button.disabled = false;
+}
+
+async function loadTeamCatalog(teamCode) {
+  const team = TEAM_DIRECTORY.find(item => item.code === teamCode);
+  const button = document.getElementById('team-catalog-button');
+  const note = document.getElementById('team-catalog-note');
+  if (!team || !button) return;
+  button.disabled = true;
+  button.textContent = 'Loading schedule…';
+  if (note) note.textContent = `${team.name} · loading full season schedule`;
+  const homeStatus = document.getElementById('home-fetch-status');
+  if (homeStatus) { homeStatus.className = 'home-fetch-status loading'; homeStatus.textContent = `Loading ${team.name} schedule…`; }
+  try {
+    const data = await cachedJSON(`team-schedule:${teamCode}`, `${API_BASE}/api/teams/${encodeURIComponent(teamCode)}/games`, 900000);
+    state.catalogTeam = teamCode;
+    state.catalogGames = data.games || [];
+    renderGameList();
+    updateTeamCatalogBar();
+    if (homeStatus && state.catalogGames.length) {
+      homeStatus.className = 'home-fetch-status';
+      homeStatus.textContent = `${state.catalogGames.length} ${team.name} games in the catalog`;
+    }
+  } catch (err) {
+    button.disabled = false;
+    button.textContent = 'Retry schedule';
+    if (note) note.textContent = `${team.name} · schedule unavailable`;
+    if (homeStatus) { homeStatus.className = 'home-fetch-status error'; homeStatus.textContent = `Team schedule unavailable: ${err.message}`; }
+  }
+}
+
+renderTeamCarousel();
+
+// ── Select game ────────────────────────────────────────────────────────────
+function _resetReplay() {
+  if (state.replayTimer) { clearInterval(state.replayTimer); state.replayTimer = null; }
+  state.replayMode = false;
+  state.replayIndex = 0;
+  state.predictCache = {};
+}
+
+async function selectGame(gameId, startReplay = false, selectedMode = null) {
+  const game = [...state.games, ...state.catalogGames].find(g => g.game_id === gameId);
+  if (!game) return;
+
+  _resetReplay();
+  state.selectedGame = game;
+  state.events = [];
+  state.players = null;
+  state.quarterFilter = 'all';
+  state.predictionMode = selectedMode || (game.status === 'Final' ? null : 'live');
+  state.analystOutput = null;
+  state.lastLiveUpdate = null;
+  state.liveReconnects = 0;
+
+  // Close existing SSE stream
+  if (state.liveStream) { state.liveStream.close(); state.liveStream = null; }
+
+  renderGameList();
+
+  // Completed games require an explicit view choice before loading detail.
+  if (game.status === 'Final' && !selectedMode && !startReplay) {
+    // Start the expensive history request while the user chooses a view.
+    prefetchHistory(gameId);
+    renderModeChooser(game);
+    document.getElementById('placeholder').style.display = 'none';
+    document.getElementById('game-detail').style.display = 'flex';
+    return;
+  }
+
+  const cachedPlayers = cachedValue(`players:${gameId}`);
+  const hasCachedPlayers = Boolean(cachedPlayers?.home?.length || cachedPlayers?.away?.length);
+  if (hasCachedPlayers) state.players = cachedPlayers;
+  // Roster data is fetched in parallel with history so the intro can fill in
+  // names/photos without adding another user action or delaying the model.
+  const playersPromise = hasCachedPlayers
+    ? Promise.resolve(cachedPlayers)
+    : fetchGamePlayers(gameId, true).catch(() => null);
+  const historyPromise = fetchGameHistory(gameId, game.status === 'Live');
+
+  renderRosterIntro(game, state.predictionMode || 'live', cachedPlayers);
+
+  playersPromise.then(players => {
+    if (!players?.home?.length && !players?.away?.length) return;
+    if (state.selectedGame?.game_id !== gameId) return;
+    state.players = players;
+    // If the roster intro is still on screen, replace its placeholders with
+    // the cached/API-backed player cards. Once detail is visible, leave it
+    // alone so the game view is never interrupted.
+    if (document.getElementById('roster-intro')) {
+      renderRosterIntro(game, state.predictionMode || 'live', players);
+    }
+  });
+
+  document.getElementById('placeholder').style.display = 'none';
+  document.getElementById('game-detail').style.display = 'flex';
+
+  try {
+    await wait(900);
+    const quickHistory = await Promise.race([
+      historyPromise.then(data => ({data})).catch(err => ({err})),
+      wait(2200).then(() => null),
+    ]);
+    if (!quickHistory) {
+      // Keep the roster intro on screen while the real game data finishes.
+      // Rendering the prediction shell here made it look like the app had
+      // skipped ahead even though history was still unresolved.
+      const rosterStatus = document.querySelector('.roster-loading-status');
+      if (rosterStatus) rosterStatus.textContent = 'Loading game data';
+    }
+    if (quickHistory?.err) throw quickHistory.err;
+    const data = quickHistory?.data || await historyPromise;
+    state.events = data.events || [];
+    state.openingContext = data.opening_context || null;
+    state.featureContext = data.latest_context || null;
+    state.historyError = null;
+  } catch (err) {
+    state.events = [];
+    let msg = err.message;
+    try { msg = JSON.parse(msg).detail ?? msg; } catch (_) {}
+    if (msg.toLowerCase().includes('timed out') || msg.toLowerCase().includes('timeout')) {
+      msg = 'stats.nba.com timed out loading play-by-play';
+    }
+    state.historyError = msg;
+  }
+
+  // Give the roster request a brief chance to populate the intro. It runs in
+  // parallel with history, so cached rosters are instant and a slow upstream
+  // roster service can never block the game view indefinitely.
+  let rosterArrived = Boolean(state.players);
+  if (!state.players) {
+    const introPlayers = await Promise.race([
+      playersPromise,
+      wait(6000).then(() => null),
+    ]);
+    if (introPlayers?.home?.length || introPlayers?.away?.length) {
+      state.players = introPlayers;
+      rosterArrived = true;
+    }
+  }
+
+  // Keep the loaded player cards visible long enough to be read before the
+  // prediction view fades in. Cached rosters only add this small handoff;
+  // an unavailable upstream roster still times out at the six-second limit.
+  if (rosterArrived) await wait(5000);
+
+  // Fetch current live snapshot from Redis
+  let liveData = null;
+  if (game.status === 'Live') {
+    try {
+      const resp = await fetch(`${API_BASE}/api/games/${gameId}/live`);
+      if (resp.ok) { const d = await resp.json(); if (d.available) liveData = d; }
+    } catch (_) {}
+  }
+
+  if (liveData?.feature_context) state.featureContext = liveData.feature_context;
+  renderDetail(game, liveData, state.events);
+
+  if (state.historyError) {
+    _showHistoryError(gameId, state.historyError);
+  }
+
+  // Start SSE for live games
+  if (game.status === 'Live') {
+    startStream(gameId);
+  }
+
+  // Auto-enter replay mode if requested (from ▶ Replay card button)
+  if (startReplay && game.status === 'Final' && state.events.length) {
+    enterReplayMode();
+  }
+}
+
+function fetchGameHistory(gameId, refresh = false) {
+  if (!refresh && state.historyRequests[gameId]) return state.historyRequests[gameId];
+  const url = `${API_BASE}/api/games/${gameId}/history${refresh ? '?refresh=1' : ''}`;
+  const request = (refresh ? fetch(url).then(async resp => {
+      if (!resp.ok) throw new Error(await resp.text());
+      return resp.json();
+    }) : cachedJSON(`history:${gameId}`, url, 3600000))
+    .catch(err => {
+      if (!refresh) delete state.historyRequests[gameId];
+      throw err;
+    });
+  if (!refresh) state.historyRequests[gameId] = request;
+  return request;
+}
+
+function fetchGamePlayers(gameId, refresh = false) {
+  if (!refresh && state.playerRequests[gameId]) return state.playerRequests[gameId];
+  const url = `${API_BASE}/api/games/${gameId}/players${refresh ? '?refresh=1' : ''}`;
+  const request = (refresh ? fetch(url).then(async resp => {
+      if (!resp.ok) throw new Error(await resp.text());
+      return resp.json();
+    }) : cachedJSON(`players:${gameId}`, url, 3600000))
+    .catch(err => {
+      if (!refresh) delete state.playerRequests[gameId];
+      throw err;
+    });
+  if (!refresh) state.playerRequests[gameId] = request;
+  return request;
+}
+
+function wait(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function prefetchHistory(gameId) {
+  fetchGameHistory(gameId).catch(() => {});
+}
+
+async function selectGameReplay(gameId) {
+  await selectGame(gameId, true, 'live');
+}
+
+function renderModeChooser(game) {
+  const detail = document.getElementById('game-detail');
+  detail.innerHTML = `
+    <div class="mode-chooser">
+      <div class="mode-chooser-kicker">${escapeHTML(game.home_team)} vs ${escapeHTML(game.away_team)}</div>
+      <h2>Choose a game view</h2>
+      <p>Pick what you want to inspect before loading the game.</p>
+      <div class="mode-chooser-options">
+        <button class="mode-choice" data-mode="live">
+          <span class="mode-choice-title">Live prediction</span>
+          <span class="mode-choice-copy">Replay the game state and probability timeline.</span>
+        </button>
+        <button class="mode-choice" data-mode="pregame">
+          <span class="mode-choice-title">Before game</span>
+          <span class="mode-choice-copy">Opening win probability and an AI pregame read.</span>
+        </button>
+      </div>
+    </div>`;
+  detail.querySelectorAll('.mode-choice').forEach(button => {
+    button.addEventListener('click', () => selectGame(game.game_id, false, button.dataset.mode));
+  });
+}
+
+function renderRosterIntro(game, mode = 'live', players = null) {
+  const detail = document.getElementById('game-detail');
+  const modeLabel = mode === 'pregame' ? 'Opening prediction' : 'Live prediction';
+  const hasPlayers = Boolean(players?.home?.length || players?.away?.length);
+  const home = rosterSideHTML(game, 'home', players?.home || []);
+  const away = rosterSideHTML(game, 'away', players?.away || []);
+  detail.innerHTML = `
+    <section class="roster-intro" id="roster-intro" aria-label="Team intro">
+      <div class="roster-topbar">
+        <div>
+          <div class="roster-kicker">${escapeHTML(modeLabel)}</div>
+          <h2>${escapeHTML(game.home_team)} vs ${escapeHTML(game.away_team)}</h2>
+        </div>
+        <div class="roster-loading">
+          <span class="roster-loading-line"></span>
+          <span>Preparing model desk</span>
+          <span class="roster-loading-status">${hasPlayers ? 'Roster ready' : 'Loading roster'}</span>
+        </div>
+      </div>
+      <div class="roster-stage">
+        ${home}
+        ${away}
+      </div>
+    </section>`;
+}
+
+function rosterSideHTML(game, side, players = []) {
+  const abbr = side === 'home' ? game.home_team : game.away_team;
+  const source = state.players?.lineup_source;
+  const verified = source === 'boxscore_start_position' || source === 'opening_play_by_play';
+  const label = verified
+    ? (side === 'home' ? 'Home starting five' : 'Away starting five')
+    : (side === 'home' ? 'Home roster preview' : 'Away roster preview');
+  const revealOffset = side === 'away' ? 5 : 0;
+  const cards = players.slice(0, 5).map((player, i) => playerCardHTML(player, abbr, i + revealOffset)).join('');
+  return `
+    <div class="roster-team-panel ${side}">
+      <div class="roster-team-head">
+        ${teamMark(abbr, 'roster-team-logo')}
+        <div>
+          <span>${escapeHTML(label)}</span>
+          <strong>${escapeHTML(abbr)}</strong>
+        </div>
+      </div>
+      <div class="roster-cards">${cards || '<div class="roster-pending">Loading verified roster</div>'}</div>
+    </div>`;
+}
+
+function playerCardHTML(player, teamAbbr, index) {
+  const hasPlayer = Boolean(player);
+  const jersey = hasPlayer && player.jersey ? player.jersey : String(index + 1).padStart(2, '0');
+  const name = hasPlayer ? player.name : `${teamAbbr} player`;
+  const subtitle = hasPlayer
+    ? `${player.position || (player.starter ? 'Starter' : 'Rotation')} · ${Number(player.points || 0)} PTS`
+    : 'Local roster slot';
+  const imageUrl = hasPlayer && player.image_url
+    ? String(player.image_url).replace('/1040x760/', '/260x190/')
+    : '';
+  const img = imageUrl
+    ? `<img class="roster-player-img" src="${escapeHTML(imageUrl)}" alt="${escapeHTML(name)}" loading="eager" decoding="async" onerror="this.classList.add('is-hidden')">`
+    : '';
+  return `
+    <article class="roster-player-card" style="--delay:${index * 300}ms">
+      <div class="roster-big-number">${escapeHTML(jersey)}</div>
+      ${teamMark(teamAbbr, 'roster-card-logo')}
+      ${img}
+      <div class="roster-player-meta">
+        <span class="roster-player-number">${escapeHTML(jersey)}</span>
+        <div>
+          <strong>${escapeHTML(name)}</strong>
+          <span>${escapeHTML(subtitle)}</span>
+        </div>
+      </div>
+    </article>`;
+}
+
+function _showHistoryError(gameId, msg) {
+  const svg = document.getElementById('prob-chart');
+  if (svg) {
+    svg.innerHTML = '';
+    const ns = 'http://www.w3.org/2000/svg';
+    const mk = tag => document.createElementNS(ns, tag);
+    const set = (el, attrs) => { Object.entries(attrs).forEach(([k,v]) => el.setAttribute(k,v)); return el; };
+    const t1 = mk('text'); t1.textContent = msg;
+    set(t1, {x: 350, y: 105, 'text-anchor': 'middle', fill: '#ef4444', 'font-size': 12});
+    svg.appendChild(t1);
+    const t2 = mk('text'); t2.textContent = 'Click to retry';
+    set(t2, {x: 350, y: 128, 'text-anchor': 'middle', fill: '#6366f1', 'font-size': 12, cursor: 'pointer'});
+    t2.style.cursor = 'pointer';
+    t2.addEventListener('click', () => selectGame(gameId));
+    svg.appendChild(t2);
+  }
+  const pbpEl = document.getElementById('pbp-list');
+  if (pbpEl) pbpEl.innerHTML = `
+    <div class="pbp-empty">
+      ${escapeHTML(msg)}<br>
+      <button class="history-retry"
+        style="margin-top:8px;background:var(--surface2);border:1px solid var(--border);
+               color:var(--text);border-radius:4px;padding:4px 10px;cursor:pointer;font-size:12px">
+        Retry
+      </button>
+    </div>`;
+  pbpEl?.querySelector('.history-retry')?.addEventListener('click', () => selectGame(gameId));
+}
+
+// ── Render game detail ─────────────────────────────────────────────────────
+function renderDetail(game, liveData, events) {
+  const detail = document.getElementById('game-detail');
+  const pregameView = game.status === 'Final' && state.predictionMode === 'pregame';
+  const prob = liveData?.model_prob ?? null;
+  // Before-game mode represents the opening state, so never show the final score.
+  const homeScore = pregameView ? 0 : (liveData?.home_score ?? game.home_score);
+  const awayScore = pregameView ? 0 : (liveData?.away_score ?? game.away_score);
+  const period = pregameView ? 0 : (liveData?.period ?? game.period);
+  const clock = pregameView ? 'Before tip' : (liveData ? formatClock(liveData.seconds_remaining, period) : game.clock);
+
+  detail.innerHTML = `
+    ${scoreHeaderHTML(game, homeScore, awayScore, period, clock)}
+    ${game.status === 'Final' && !pregameView ? replayBarHTML(events.length) : ''}
+    ${predictionModeHTML(game, events)}
+    ${probBarHTML(game, prob, events)}
+    ${pregameView ? '' : liveWorkspaceHTML(game)}
+    ${analystSectionHTML(game, events)}
+  `;
+
+  // Wire up quarter tabs
+  detail.querySelectorAll('.quarter-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      state.quarterFilter = tab.dataset.q;
+      detail.querySelectorAll('.quarter-tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      drawChart(visibleEvents(), state.quarterFilter);
+      renderPBP(visibleEvents(), state.quarterFilter);
+    });
+  });
+
+  detail.querySelectorAll('.prediction-mode-btn').forEach(button => {
+    button.addEventListener('click', () => {
+      state.predictionMode = button.dataset.mode;
+      renderDetail(game, liveData, state.events);
+    });
+  });
+
+  // Wire up replay controls
+  const playBtn   = document.getElementById('replay-play-btn');
+  const resetBtn  = document.getElementById('replay-reset-btn');
+  const slider    = document.getElementById('replay-slider');
+  const speedSel  = document.getElementById('replay-speed-sel');
+  if (playBtn)  playBtn.addEventListener('click',  toggleReplay);
+  if (resetBtn) resetBtn.addEventListener('click',  resetReplay);
+  if (slider)   slider.addEventListener('input', e => {
+    state.replayIndex = parseInt(e.target.value);
+    syncReplayUI();
+  });
+  if (speedSel) speedSel.addEventListener('change', e => {
+    state.replaySpeed = parseInt(e.target.value, 10);
+    // Apply the new cadence immediately when replay is already playing.
+    if (state.replayTimer) {
+      clearInterval(state.replayTimer);
+      state.replayTimer = setInterval(stepReplay, state.replaySpeed);
+    }
+  });
+
+  // Wire up analyst button (live games only)
+  const analyzeBtn = document.getElementById('analyze-btn');
+  if (analyzeBtn) {
+    analyzeBtn.addEventListener('click', () => runAnalyst(game.game_id));
+  }
+  if (pregameView && events.length) runPregameAnalyst(events);
+
+  if (!pregameView) drawChart(visibleEvents(), state.quarterFilter);
+  renderPBP(visibleEvents(), state.quarterFilter);
+}
+
+function scoreHeaderHTML(game, homeScore, awayScore, period, clock) {
+  const clockStr = period > 0 ? `${periodLabel(period)} · ${clock || ''}` : 'Scheduled';
+  return `
+    <div class="score-header">
+      <div class="score-row">
+        <div class="team-block">
+          ${teamMark(game.home_team, 'score-team-mark')}
+          <div class="team-abbr" style="color:var(--home)">${escapeHTML(game.home_team)}</div>
+          <div class="team-name">${escapeHTML(game.home_team_name || 'Home')}</div>
+        </div>
+        <div class="score-center">
+          <div class="score-display">
+            <span style="color:var(--home)">${escapeHTML(homeScore)}</span>
+            <span class="score-sep">–</span>
+            <span style="color:var(--away)">${escapeHTML(awayScore)}</span>
+          </div>
+          <div class="game-clock">${escapeHTML(clockStr)}</div>
+        </div>
+        <div class="team-block">
+          ${teamMark(game.away_team, 'score-team-mark')}
+          <div class="team-abbr" style="color:var(--away)">${escapeHTML(game.away_team)}</div>
+          <div class="team-name">${escapeHTML(game.away_team_name || 'Away')}</div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function predictionModeHTML(game, events) {
+  if (game.status !== 'Final' || !events.length) return '';
+  return `
+    <div class="prediction-mode" aria-label="Prediction mode">
+      <span class="prediction-mode-label">Past game view</span>
+      <div class="prediction-mode-options">
+        <button class="prediction-mode-btn${state.predictionMode === 'live' ? ' active' : ''}" data-mode="live">Live prediction</button>
+        <button class="prediction-mode-btn${state.predictionMode === 'pregame' ? ' active' : ''}" data-mode="pregame">Before game</button>
+      </div>
+    </div>`;
+}
+
+function probBarHTML(game, liveProb, events = []) {
+  let prob = liveProb;
+  let label = game.status === 'Live' ? 'Live prediction' : 'Win Probability';
+  const modelEvents = events.filter(e => e.model_prob !== null && e.model_prob !== undefined);
+  if (game.status === 'Final' && events.length) {
+    const opening = modelEvents[0]?.model_prob ?? null;
+    const latest = modelEvents[modelEvents.length - 1]?.model_prob ?? null;
+    prob = state.predictionMode === 'pregame' ? opening : latest;
+    label = state.predictionMode === 'pregame' ? 'Before game prediction' : 'Live prediction';
+  } else if ((prob === null || prob === undefined) && modelEvents.length) {
+    prob = modelEvents[modelEvents.length - 1].model_prob;
+    label = game.status === 'Live' ? 'Live prediction' : 'Win Probability';
+  }
+  if (prob === null || prob === undefined) {
+    if (game.status === 'Final' && state.predictionMode === 'pregame') {
+      return `
+        <div class="prob-section">
+          <div class="prob-no-model">Loading opening prediction…</div>
+        </div>`;
+    }
+    if (game.status === 'Final') return '';
+    return `
+      <div class="prob-section">
+        <div class="prob-no-model">Model not loaded — set <code>NBA_WINPROB_ANALYST_MLFLOW_RUN_ID</code></div>
+      </div>`;
+  }
+  const homePct = Math.round(prob * 100);
+  const awayPct = 100 - homePct;
+  return `
+    <div class="prob-section" id="prob-section">
+      <div class="prob-title">${label}</div>
+      <div class="prob-bar-wrap">
+        <div class="prob-team-label" style="color:var(--home)">${escapeHTML(game.home_team)}</div>
+        <div class="prob-bar">
+          <div class="prob-bar-home" id="prob-home" style="width:${homePct}%">${homePct}%</div>
+          <div class="prob-bar-away" id="prob-away">${awayPct}%</div>
+        </div>
+        <div class="prob-team-label" style="color:var(--away)">${escapeHTML(game.away_team)}</div>
+      </div>
+      ${game.status === 'Live' ? '<div class="prob-update" id="prob-update">Listening for the next play</div>' : ''}
+    </div>`;
+}
+
+function updateProbabilityBar(prob) {
+  const numericProb = (prob === null || prob === undefined) ? NaN : Number(prob);
+  if (!Number.isFinite(numericProb)) return;
+  const pct = Math.max(0, Math.min(100, Math.round(numericProb * 100)));
+  const homeBar = document.getElementById('prob-home');
+  const awayBar = document.getElementById('prob-away');
+  if (homeBar) { homeBar.style.width = `${pct}%`; homeBar.textContent = `${pct}%`; }
+  if (awayBar) awayBar.textContent = `${100 - pct}%`;
+}
+
+function modelContextHTML(game, context = null) {
+  const c = context || (state.predictionMode === 'pregame' ? state.openingContext : state.featureContext);
+  if (!c) return '';
+  const pct = value => `${Math.round(Number(value || 0) * 100)}%`;
+  const signed = value => `${Number(value || 0) > 0 ? '+' : ''}${Number(value || 0)}`;
+  const eloDelta = Number(c.home_elo_rating || 0) - Number(c.away_elo_rating || 0);
+  return `
+    <div class="model-context">
+      <div class="model-context-header">
+        <span class="model-context-title">What the model is using</span>
+        <span class="model-context-note">Team-specific inputs · no analyst assumptions</span>
+      </div>
+      <div class="model-context-grid">
+        <div class="model-context-item"><span class="model-context-label">Season W%</span><span class="model-context-value">${pct(c.home_win_pct)} – ${pct(c.away_win_pct)}</span></div>
+        <div class="model-context-item"><span class="model-context-label">Venue W%</span><span class="model-context-value">${pct(c.home_venue_win_pct)} – ${pct(c.away_venue_win_pct)}</span></div>
+        <div class="model-context-item"><span class="model-context-label">Venue margin</span><span class="model-context-value">${signed(Number(c.home_venue_avg_margin || 0).toFixed(1))} – ${signed(Number(c.away_venue_avg_margin || 0).toFixed(1))}</span></div>
+        <div class="model-context-item"><span class="model-context-label">Elo edge</span><span class="model-context-value">${signed(Math.round(eloDelta))}</span></div>
+        <div class="model-context-item"><span class="model-context-label">Score / run</span><span class="model-context-value">${signed(c.score_diff)} / ${signed(Number(c.run_home || 0) - Number(c.run_away || 0))}</span></div>
+      </div>
+    </div>`;
+}
+
+function chartSectionHTML() {
+  const quarters = ['all','1','2','3','4'];
+  const tabs = quarters.map(q => {
+    const label = q === 'all' ? 'All' : `Q${q}`;
+    return `<button class="quarter-tab${q === state.quarterFilter ? ' active' : ''}" data-q="${q}">${label}</button>`;
+  }).join('');
+  return `
+    <div class="chart-section">
+      <div class="chart-header">
+        <div class="chart-title">Win Probability Over Time</div>
+        <div class="quarter-tabs">${tabs}</div>
+      </div>
+      <div class="chart-svg-wrap">
+        <svg class="prob-chart" id="prob-chart" viewBox="0 0 700 240" preserveAspectRatio="xMidYMid meet">
+          <text id="chart-loading" x="350" y="120" text-anchor="middle" fill="#64748b" font-size="13">Loading…</text>
+        </svg>
+      </div>
+    </div>`;
+}
+
+function liveWorkspaceHTML(game) {
+  return `
+    <section class="live-workspace" aria-label="Live prediction timeline">
+      ${chartSectionHTML()}
+      ${pbpSectionHTML(game.game_id)}
+    </section>`;
+}
+
+function replayBarHTML(total = 0) {
+  const counterText = total ? `0 / ${total}` : '— / —';
+  return `
+    <div class="replay-bar" id="replay-bar">
+      <span class="replay-label">Replay</span>
+      <button class="replay-btn-ctrl" id="replay-reset-btn" title="Back to start">Start</button>
+      <button class="replay-btn-ctrl" id="replay-play-btn" title="Play or pause replay">Play</button>
+      <input type="range" class="replay-slider" id="replay-slider" min="0" max="${total}" value="0">
+      <span class="replay-counter" id="replay-counter">${counterText}</span>
+      <select class="replay-speed" id="replay-speed-sel">
+        <option value="1200">Slow</option>
+        <option value="500" selected>Normal</option>
+        <option value="150">Fast</option>
+        <option value="40">Blazing</option>
+      </select>
+    </div>`;
+}
+
+function pbpSectionHTML(gameId) {
+  const status = state.selectedGame?.status;
+  const showHint = status === 'Final' || status === 'Live';
+  return `
+    <div class="pbp-section">
+      <div class="pbp-title">Play by Play</div>
+      <div class="pbp-list" id="pbp-list">
+        <div class="pbp-empty" id="pbp-loading">Loading…</div>
+      </div>
+      ${showHint ? '<div class="pbp-hint">Select AI read on any play to analyze that moment</div>' : ''}
+    </div>`;
+}
+
+function analystSectionHTML(game, events = []) {
+  if (game.status === 'Final' && state.predictionMode === 'pregame') {
+    return `
+      <div class="analyst-section pregame-analyst-section">
+        <div class="analyst-header">
+          <div class="analyst-title">AI Analyst <span style="color:var(--accent);font-size:10px;margin-left:4px">verified context</span></div>
+        </div>
+        <div class="analyst-subsection-title">Before game read</div>
+        <div class="analyst-output visible" id="pregame-analyst-output">
+          <div class="analyst-empty"><span class="spinner" style="border-top-color:#6366f1"></span> Building opening read…</div>
+        </div>
+      </div>`;
+  }
+  const isLive = game.status === 'Live';
+  if (isLive) {
+    return `
+      <div class="analyst-section">
+        <div class="analyst-header">
+          <div class="analyst-title">AI Analyst <span style="color:var(--accent);font-size:10px;margin-left:4px">model + official context</span></div>
+        </div>
+        <div class="analyst-subsection">
+          <div class="analyst-subsection-title">Play by Play Analyst</div>
+          <div id="pbp-analyst-output">
+            <div class="analyst-empty">Select AI read on any play above for an analysis at that moment</div>
+          </div>
+        </div>
+      </div>`;
+  }
+  return `
+    <div class="analyst-section">
+      <div class="analyst-header">
+        <div class="analyst-title">AI Analyst <span style="color:var(--accent);font-size:10px;margin-left:4px">moment read</span></div>
+      </div>
+      <div id="pbp-analyst-output">
+        <div class="analyst-empty">Select AI read on any play above for an analysis at that moment</div>
+      </div>
+    </div>`;
+}
+
+// Returns the slice of events currently visible (all events, or up to replay index)
+function visibleEvents() {
+  if (!state.replayMode || state.replayIndex === 0) return state.events;
+  return state.events.slice(0, state.replayIndex);
+}
+
+// ── Probability / Score-differential chart ─────────────────────────────────
+function drawChart(events, qFilter) {
+  const svg = document.getElementById('prob-chart');
+  const titleEl = document.querySelector('.chart-title');
+  if (!svg) return;
+  svg.innerHTML = '';
+
+  const W = 700, H = 240;
+  const PAD = { top: 20, right: 20, bottom: 28, left: 46 };
+  const CW = W - PAD.left - PAD.right;
+  const CH = H - PAD.top - PAD.bottom;
+  const NS = 'http://www.w3.org/2000/svg';
+
+  const mk = tag => document.createElementNS(NS, tag);
+  const set = (el, attrs) => { Object.entries(attrs).forEach(([k,v]) => el.setAttribute(k,v)); return el; };
+  const txt = (content, attrs) => { const t = mk('text'); t.textContent = content; return set(t, attrs); };
+
+  // Prefer model_prob; fall back to score differential
+  let probData = events.filter(e => e.model_prob !== null && e.model_prob !== undefined);
+  if (qFilter !== 'all') probData = probData.filter(e => e.period === parseInt(qFilter));
+
+  const useScoreDiff = probData.length === 0;
+  let data = useScoreDiff
+    ? (qFilter === 'all' ? events : events.filter(e => e.period === parseInt(qFilter)))
+    : probData;
+
+  if (titleEl) titleEl.textContent = useScoreDiff ? 'Score Differential' : 'Win Probability Over Time';
+
+  if (!data.length) {
+    svg.appendChild(txt(
+      events.length ? 'No data for this quarter' : 'No play-by-play data',
+      {x: W/2, y: H/2, 'text-anchor': 'middle', fill: '#64748b', 'font-size': 13}
+    ));
+    return;
+  }
+
+  // Keep a quarter view on its real 12-minute window instead of stretching
+  // a partial Q1 sample across a full 48-minute game timeline.
+  const selectedQuarter = qFilter !== 'all' ? parseInt(qFilter) : null;
+  const quarterLength = selectedQuarter && selectedQuarter > 4 ? 300 : 720;
+  const minT = selectedQuarter ? (selectedQuarter - 1) * 720 : data[0].seconds_elapsed;
+  const maxT = selectedQuarter ? minT + quarterLength : data[data.length-1].seconds_elapsed;
+  const tRange = maxT - minT || 1;
+  const xS = t => PAD.left + ((t - minT) / tRange) * CW;
+
+  // Y scale and axis labels differ by chart mode
+  let yS, midY, getVal;
+  if (useScoreDiff) {
+    const diffs = data.map(e => e.home_score - e.away_score);
+    const maxAbs = Math.max(Math.abs(Math.min(...diffs)), Math.abs(Math.max(...diffs)), 8);
+    const tickStep = maxAbs <= 15 ? 5 : 10;
+    yS = d => PAD.top + (1 - (d + maxAbs) / (2 * maxAbs)) * CH;
+    midY = yS(0);
+    getVal = e => e.home_score - e.away_score;
+    // Y-axis ticks
+    for (let d = -maxAbs; d <= maxAbs; d += tickStep) {
+      const y = yS(d);
+      if (d !== -maxAbs && d !== maxAbs) {
+        svg.appendChild(set(mk('line'), {x1: PAD.left, y1: y, x2: PAD.left+CW, y2: y, stroke: '#334155', 'stroke-width': 1}));
+      }
+      svg.appendChild(txt(d > 0 ? `+${d}` : `${d}`, {x: PAD.left-6, y: y+4, 'text-anchor': 'end', fill: '#64748b', 'font-size': 10}));
+    }
+  } else {
+    yS = p => PAD.top + (1 - p) * CH;
+    midY = yS(0.5);
+    getVal = e => e.model_prob;
+    [0, 0.25, 0.5, 0.75, 1.0].forEach(p => {
+      const y = yS(p);
+      if (p > 0 && p < 1) {
+        svg.appendChild(set(mk('line'), {x1: PAD.left, y1: y, x2: PAD.left+CW, y2: y, stroke: '#334155', 'stroke-width': 1}));
+      }
+      svg.appendChild(txt(`${Math.round(p*100)}%`, {x: PAD.left-6, y: y+4, 'text-anchor': 'end', fill: '#64748b', 'font-size': 10}));
+    });
+  }
+
+  // Grid background
+  svg.appendChild(set(mk('rect'), {x: PAD.left, y: PAD.top, width: CW, height: CH, fill: '#ffffff08', rx: 4}));
+
+  // Mid-line (50% or diff=0)
+  svg.appendChild(set(mk('line'), {x1: PAD.left, y1: midY, x2: PAD.left+CW, y2: midY, stroke: '#475569', 'stroke-width': 1.5, 'stroke-dasharray': '5,4'}));
+
+  // Quarter boundaries
+  if (qFilter === 'all') {
+    [720, 1440, 2160, 2880].forEach((t, i) => {
+      if (t > minT && t < maxT) {
+        const x = xS(t);
+        svg.appendChild(set(mk('line'), {x1: x, y1: PAD.top, x2: x, y2: PAD.top+CH, stroke: '#475569', 'stroke-width': 1, 'stroke-dasharray': '3,3'}));
+        svg.appendChild(txt(`Q${i+2}`, {x: x+3, y: PAD.top+11, fill: '#64748b', 'font-size': 9}));
+      }
+    });
+    svg.appendChild(txt('Start', {x: PAD.left, y: H-6, 'text-anchor': 'middle', fill: '#475569', 'font-size': 10}));
+    svg.appendChild(txt('End', {x: PAD.left+CW, y: H-6, 'text-anchor': 'middle', fill: '#475569', 'font-size': 10}));
+  } else {
+    svg.appendChild(txt('12:00', {x: PAD.left, y: H-6, 'text-anchor': 'middle', fill: '#475569', 'font-size': 10}));
+    svg.appendChild(txt('0:00', {x: PAD.left+CW, y: H-6, 'text-anchor': 'middle', fill: '#475569', 'font-size': 10}));
+  }
+
+  // Clip paths for split fill
+  const defs = mk('defs');
+  const cA = mk('clipPath'); cA.id = 'clip-above'; cA.appendChild(set(mk('rect'), {x: PAD.left, y: PAD.top, width: CW, height: midY - PAD.top}));
+  const cB = mk('clipPath'); cB.id = 'clip-below'; cB.appendChild(set(mk('rect'), {x: PAD.left, y: midY, width: CW, height: PAD.top + CH - midY}));
+  defs.appendChild(cA); defs.appendChild(cB);
+  svg.appendChild(defs);
+
+  // Build path points
+  const pts = data.map(e => [xS(e.seconds_elapsed), yS(getVal(e))]);
+  const [first, lastPt] = [pts[0], pts[pts.length-1]];
+  const fillD = `M${first[0]},${midY} ${pts.map(([x,y])=>`L${x},${y}`).join(' ')} L${lastPt[0]},${midY} Z`;
+
+  svg.appendChild(set(mk('path'), {d: fillD, fill: 'rgba(59,130,246,0.22)', 'clip-path': 'url(#clip-above)'}));
+  svg.appendChild(set(mk('path'), {d: fillD, fill: 'rgba(239,68,68,0.22)', 'clip-path': 'url(#clip-below)'}));
+
+  const lineD = pts.map(([x,y],i) => `${i===0?'M':'L'}${x},${y}`).join(' ');
+  svg.appendChild(set(mk('path'), {d: lineD, fill: 'none', stroke: '#3b82f6', 'stroke-width': 2, 'stroke-linejoin': 'round'}));
+  svg.appendChild(set(mk('circle'), {cx: lastPt[0], cy: lastPt[1], r: 4, fill: '#3b82f6', stroke: '#1e293b', 'stroke-width': 2}));
+  svg.appendChild(set(mk('rect'), {x: PAD.left, y: PAD.top, width: CW, height: CH, fill: 'none', stroke: '#334155', 'stroke-width': 1, rx: 4}));
+}
+
+// ── Play-by-play list ──────────────────────────────────────────────────────
+function renderPBP(events, qFilter) {
+  const el = document.getElementById('pbp-list');
+  if (!el) return;
+
+  const gameId = state.selectedGame?.game_id;
+  const isFinal = state.selectedGame?.status === 'Final';
+  const isLive = state.selectedGame?.status === 'Live';
+
+  let data = [...events];
+  if (qFilter !== 'all') {
+    data = data.filter(e => e.period === parseInt(qFilter));
+  }
+
+  if (state.replayMode) {
+    // Chronological, newest at bottom — cap at 80
+    data = data.slice(-80);
+  } else {
+    // Reverse chronological, newest at top — cap at 50
+    data = data.reverse().slice(0, 50);
+  }
+
+  if (!data.length) {
+    el.innerHTML = `<div class="pbp-empty">${events.length ? 'No plays this quarter' : 'No data'}</div>`;
+    return;
+  }
+
+  const lastEventNum = state.replayMode && events.length ? events[events.length - 1].event_num : null;
+
+  el.innerHTML = data.map(e => {
+    const prob = e.model_prob;
+    const dotColor = prob === null ? '#64748b' : prob >= 0.6 ? '#22c55e' : prob <= 0.4 ? '#ef4444' : '#94a3b8';
+    const timeLabel = `Q${e.period} ${formatClock(e.seconds_remaining, e.period)}`;
+    const desc = escapeHTML(e.description || '—');
+    const score = `${e.home_score}–${e.away_score}`;
+    const probText = prob !== null ? `${Math.round(prob*100)}%` : '';
+    const isCurrent = state.replayMode && e.event_num === lastEventNum;
+
+    const predictBtn = (isFinal || isLive) ? `
+      <button class="pbp-predict-btn" data-event="${e.event_num}" title="Analyze this moment">AI read</button>` : '';
+
+    return `
+      <div class="pbp-event${isCurrent ? ' replay-current' : ''}" id="pbp-ev-${e.event_num}">
+        <div class="pbp-clock">${timeLabel}</div>
+        <div class="pbp-prob-dot" style="background:${dotColor}" title="${probText}"></div>
+        <div class="pbp-desc">${desc}</div>
+        <div class="pbp-score">${score}</div>
+        ${predictBtn}
+      </div>`;
+  }).join('');
+
+  // Wire predict buttons
+  el.querySelectorAll('.pbp-predict-btn').forEach(btn => {
+    btn.addEventListener('click', () => runPredictAt(parseInt(btn.dataset.event)));
+  });
+
+  // Scroll to bottom in replay mode so newest play is visible
+  if (state.replayMode) el.scrollTop = el.scrollHeight;
+}
+
+// ── Replay controls ────────────────────────────────────────────────────────
+function enterReplayMode() {
+  state.replayMode = true;
+  state.replayIndex = 1;
+  syncReplayUI();
+}
+
+function toggleReplay() {
+  if (!state.replayMode) enterReplayMode();
+  if (state.replayTimer) {
+    clearInterval(state.replayTimer);
+    state.replayTimer = null;
+    document.getElementById('replay-play-btn').textContent = 'Play';
+  } else {
+    document.getElementById('replay-play-btn').textContent = 'Pause';
+    state.replayTimer = setInterval(stepReplay, state.replaySpeed);
+  }
+}
+
+function stepReplay() {
+  if (state.replayIndex >= state.events.length) {
+    clearInterval(state.replayTimer);
+    state.replayTimer = null;
+    const btn = document.getElementById('replay-play-btn');
+    if (btn) btn.textContent = 'Play';
+    return;
+  }
+  state.replayIndex++;
+  syncReplayUI();
+}
+
+function resetReplay() {
+  if (state.replayTimer) { clearInterval(state.replayTimer); state.replayTimer = null; }
+  state.replayMode = true;
+  state.replayIndex = 0;
+  syncReplayUI();
+  const btn = document.getElementById('replay-play-btn');
+  if (btn) btn.textContent = 'Play';
+}
+
+function syncReplayUI() {
+  const visible = visibleEvents();
+  const slider  = document.getElementById('replay-slider');
+  const counter = document.getElementById('replay-counter');
+  if (slider) {
+    slider.max   = state.events.length;
+    slider.value = state.replayIndex;
+  }
+  if (counter) counter.textContent = `${state.replayIndex} / ${state.events.length}`;
+
+  // Update score + clock to current replay position
+  const cur = visible.length ? visible[visible.length - 1] : null;
+  if (cur) {
+    if (cur.feature_context) {
+      state.featureContext = cur.feature_context;
+    }
+    const scoreEl = document.querySelector('.score-display');
+    if (scoreEl) scoreEl.innerHTML =
+      `<span style="color:var(--home)">${cur.home_score}</span>` +
+      `<span class="score-sep">–</span>` +
+      `<span style="color:var(--away)">${cur.away_score}</span>`;
+    const clockEl = document.querySelector('.game-clock');
+    if (clockEl) clockEl.textContent =
+      `${periodLabel(cur.period)} · ${formatClock(cur.seconds_remaining, cur.period)}`;
+  }
+
+  // Replay, chart, play-by-play, and the prediction bar all follow the same
+  // current event. Previously replay updated the first three but left the
+  // bar pinned to the game's final probability.
+  const replayProbEvent = cur || state.events.find(event => event.model_prob !== null && event.model_prob !== undefined);
+  if (replayProbEvent) updateProbabilityBar(replayProbEvent.model_prob);
+  drawChart(visible, state.quarterFilter);
+  renderPBP(visible, state.quarterFilter);
+}
+
+// ── Predict at a historical play ───────────────────────────────────────────
+async function runPredictAt(eventNum) {
+  const gameId = state.selectedGame?.game_id;
+  if (!gameId) return;
+
+  const event = state.events.find(e => e.event_num === eventNum);
+  const outputEl = document.getElementById('pbp-analyst-output');
+  const cacheKey = `v2:${gameId}:${eventNum}`;
+
+  document.querySelectorAll('.pbp-predict-btn').forEach(b => b.disabled = true);
+
+  const rowEl = document.getElementById(`pbp-ev-${eventNum}`);
+  const btn = rowEl?.querySelector('.pbp-predict-btn');
+  if (btn) btn.innerHTML = '<span class="spinner" style="border-top-color:#6366f1"></span>';
+
+  if (outputEl) {
+    outputEl.innerHTML = '<div class="analyst-empty"><span class="spinner" style="border-top-color:#6366f1"></span> Analyzing…</div>';
+    outputEl.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+  }
+
+  try {
+    const cached = state.predictCache[cacheKey] || cachedValue(`analyst:${cacheKey}`);
+    if (cached) {
+      state.predictCache[cacheKey] = cached;
+      renderAnalystMoment(outputEl, cached, event);
+      return;
+    }
+
+    const refreshParam = state.selectedGame?.status === 'Live' ? '?refresh=1' : '';
+    const resp = await fetch(`${API_BASE}/api/games/${gameId}/predict-at${refreshParam}`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          event_num: eventNum,
+          home_team: state.selectedGame?.home_team || null,
+          away_team: state.selectedGame?.away_team || null,
+          game_time_utc: state.selectedGame?.game_time_utc || null,
+          is_live: state.selectedGame?.status === 'Live',
+      }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || resp.statusText);
+
+    state.predictCache[cacheKey] = data;
+    cacheValue(`analyst:${cacheKey}`, data);
+    renderAnalystMoment(outputEl, data, event);
+  } catch (err) {
+    if (outputEl) {
+      outputEl.innerHTML = `<div class="analyst-error">Error: ${escapeHTML(err.message)}</div>`;
+    }
+  } finally {
+    document.querySelectorAll('.pbp-predict-btn').forEach(b => {
+      b.disabled = false;
+      b.textContent = 'AI read';
+    });
+  }
+}
+
+function renderAnalystMoment(outputEl, data, event = null) {
+  if (!outputEl) return;
+  const mins = Math.floor(data.seconds_remaining / 60);
+  const secs = Math.floor(data.seconds_remaining % 60);
+  const timeStr = `${data.period_label} ${mins}:${String(secs).padStart(2,'0')}`;
+  const score = `${data.home_score}–${data.away_score}`;
+  const desc = event?.description || '';
+  const ctxHTML = `<div class="analyst-play-ctx">${escapeHTML(timeStr)} · ${escapeHTML(score)}${desc ? ` &nbsp;·&nbsp; ${escapeHTML(desc)}` : ''}</div>`;
+  const featureContext = event?.feature_context || data.feature_context || null;
+  outputEl.innerHTML = ctxHTML + renderPredictResultHTML(data) + modelContextHTML(state.selectedGame, featureContext);
+}
+
+async function runPregameAnalyst(events) {
+  const gameId = state.selectedGame?.game_id;
+  const opening = events.find(e => e.model_prob !== null && e.model_prob !== undefined);
+  const btn = document.getElementById('pregame-analyze-btn');
+  const outputEl = document.getElementById('pregame-analyst-output');
+  if (!gameId || !opening || !outputEl) return;
+
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>Reading…';
+  }
+  outputEl.classList.add('visible');
+  outputEl.innerHTML = '<div class="analyst-empty"><span class="spinner" style="border-top-color:#6366f1"></span> Building opening read…</div>';
+
+  try {
+    const cacheKey = `v2:${gameId}:${opening.event_num}`;
+    const cached = state.predictCache[cacheKey] || cachedValue(`analyst:${cacheKey}`);
+    if (cached) {
+      state.predictCache[cacheKey] = cached;
+      outputEl.innerHTML = '<div class="analyst-play-ctx">Opening state · before live play</div>' + renderPredictResultHTML(cached) + modelContextHTML(state.selectedGame, opening.feature_context || cached.feature_context || null);
+      return;
+    }
+
+    const resp = await fetch(`${API_BASE}/api/games/${gameId}/predict-at`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        event_num: opening.event_num,
+        home_team: state.selectedGame.home_team,
+        away_team: state.selectedGame.away_team,
+        game_time_utc: state.selectedGame.game_time_utc || null,
+        is_live: state.selectedGame.status === 'Live',
+      }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || resp.statusText);
+    state.predictCache[cacheKey] = data;
+    cacheValue(`analyst:${cacheKey}`, data);
+    outputEl.innerHTML = '<div class="analyst-play-ctx">Opening state · before live play</div>' + renderPredictResultHTML(data) + modelContextHTML(state.selectedGame, opening.feature_context || data.feature_context || null);
+  } catch (err) {
+    outputEl.innerHTML = `<div class="analyst-error">Error: ${escapeHTML(err.message)}</div>`;
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Refresh AI read';
+    }
+  }
+}
+
+function renderPredictResultHTML(d) {
+  const dirClass = d.direction === 'higher' ? 'dir-higher' : d.direction === 'lower' ? 'dir-lower' : 'dir-accurate';
+  const directionText = d.direction === 'higher' ? 'Higher' : d.direction === 'lower' ? 'Lower' : 'Even';
+  const mPct = Math.round(d.model_probability * 100);
+  const aPct = Math.round(d.analyst_probability * 100);
+  const home = state.selectedGame?.home_team || 'Home';
+  const away = state.selectedGame?.away_team || 'Away';
+  const winner = d.analyst_probability >= 0.5 ? home : away;
+  const winPct = d.analyst_probability >= 0.5 ? aPct : 100 - aPct;
+
+  return `
+    <div class="analyst-grounding">This read uses the model probability, supplied game data, and verified official availability or transaction context published before this game state.</div>
+    <div class="predict-result-headline">"${escapeHTML(d.headline)}"</div>
+    <div class="predict-result-probs">
+      <div class="predict-result-prob">
+        <div class="predict-result-prob-label">Model</div>
+        <div class="predict-result-prob-val" style="color:var(--muted)">${mPct}%</div>
+      </div>
+      <div class="predict-result-prob">
+        <div class="predict-result-prob-label">Analyst</div>
+        <div class="predict-result-prob-val ${dirClass}">${aPct}%</div>
+      </div>
+      <div class="predict-result-prob">
+        <div class="predict-result-prob-label">Pick</div>
+        <div class="predict-result-prob-val" style="color:var(--text);font-size:14px;padding-top:4px">
+          ${escapeHTML(winner)} <span style="font-size:11px;color:var(--muted)">${winPct}%</span>
+          <span style="font-size:10px;color:var(--muted)"> · ${escapeHTML(directionText)} · ${escapeHTML(d.confidence)}</span>
+        </div>
+      </div>
+    </div>
+    <div class="predict-result-factors">
+      ${d.key_factors.map(f => `<div class="predict-result-factor">${escapeHTML(f)}</div>`).join('')}
+    </div>
+    ${newsItemsHTML(d.news_items)}
+    <div class="predict-result-reasoning">${escapeHTML(d.reasoning)}</div>`;
+}
+
+function newsItemsHTML(items = []) {
+  if (!items.length) return '<div class="analyst-play-ctx"><strong>Context checked:</strong> official availability and transaction feeds returned no relevant items before this game state.</div>';
+  return `<div class="analyst-factors"><div class="analyst-factors-title">Context checked · verified availability & transactions</div>${items.map(item => `
+    <div class="analyst-factor">${escapeHTML(item.team)} · ${escapeHTML(item.text)} <span class="model-context-note">(${escapeHTML(item.published_at)})</span></div>`).join('')}</div>`;
+}
+
+// ── Live SSE stream ────────────────────────────────────────────────────────
+function startStream(gameId) {
+  if (state.liveStream) state.liveStream.close();
+  state.liveStream = new EventSource(`${API_BASE}/api/games/${gameId}/stream`);
+
+  state.liveStream.onmessage = e => {
+    const d = JSON.parse(e.data);
+    state.lastLiveUpdate = Date.now();
+    if (d.feature_context) {
+      state.featureContext = d.feature_context;
+    }
+    // Update score header
+    const scoreEl = document.querySelector('.score-display');
+    if (scoreEl) {
+      scoreEl.innerHTML = `<span style="color:var(--home)">${d.home_score}</span><span class="score-sep">–</span><span style="color:var(--away)">${d.away_score}</span>`;
+    }
+    const clockEl = document.querySelector('.game-clock');
+    if (clockEl) {
+      clockEl.textContent = `${periodLabel(d.period)} · ${formatClock(d.seconds_remaining, d.period)}`;
+    }
+    // Update the live probability bar from the same payload as the chart.
+    // If the initial snapshot arrived before the model was ready, create the
+    // bar on the first valid stream event instead of leaving a static message.
+    const liveProb = (d.model_prob === null || d.model_prob === undefined) ? NaN : Number(d.model_prob);
+    if (Number.isFinite(liveProb)) {
+      let homeBar = document.getElementById('prob-home');
+      let awayBar = document.getElementById('prob-away');
+      if (!homeBar || !awayBar) {
+        const section = document.querySelector('.prob-section');
+        if (section && state.selectedGame) {
+          section.outerHTML = probBarHTML(state.selectedGame, liveProb, state.events);
+          homeBar = document.getElementById('prob-home');
+          awayBar = document.getElementById('prob-away');
+        }
+      }
+      updateProbabilityBar(liveProb);
+    }
+    const updateEl = document.getElementById('prob-update');
+    if (updateEl) updateEl.textContent = `Updated on play ${d.event_num}`;
+    const freshText = document.getElementById('freshness-text');
+    const freshDot = document.getElementById('freshness-dot');
+    if (freshText) freshText.textContent = `Updated on play ${d.event_num} · just now`;
+    if (freshDot) freshDot.classList.remove('stale');
+    // Keep the live bar, chart, and play-by-play list on the same event.
+    // Redis/SSE can replay the current event after reconnecting, so replace
+    // an existing event rather than creating duplicate plays.
+    const liveEvent = {
+      event_num: d.event_num,
+      period: d.period,
+      seconds_remaining: d.seconds_remaining,
+      seconds_elapsed: d.seconds_elapsed,
+      home_score: d.home_score,
+      away_score: d.away_score,
+      description: state.events.find(event => event.event_num === d.event_num)?.description || d.description || '',
+      team_tricode: d.team_tricode || state.events.find(event => event.event_num === d.event_num)?.team_tricode || null,
+      player_name: d.player_name || state.events.find(event => event.event_num === d.event_num)?.player_name || null,
+      action_type: d.action_type || state.events.find(event => event.event_num === d.event_num)?.action_type || null,
+      shot_result: d.shot_result || state.events.find(event => event.event_num === d.event_num)?.shot_result || null,
+      shot_value: d.shot_value || state.events.find(event => event.event_num === d.event_num)?.shot_value || null,
+      feature_context: d.feature_context || state.featureContext,
+      model_prob: d.model_prob,
+    };
+    const existingIndex = state.events.findIndex(event => event.event_num === d.event_num);
+    if (existingIndex >= 0) state.events[existingIndex] = liveEvent;
+    else state.events.push(liveEvent);
+
+    drawChart(visibleEvents(), state.quarterFilter);
+    renderPBP(visibleEvents(), state.quarterFilter);
+  };
+
+  state.liveStream.onerror = () => {
+    state.liveReconnects += 1;
+    const updateEl = document.getElementById('prob-update');
+    const freshText = document.getElementById('freshness-text');
+    const freshDot = document.getElementById('freshness-dot');
+    if (updateEl) updateEl.textContent = 'Live feed interrupted · reconnecting';
+    if (freshText) freshText.textContent = 'Live feed interrupted · reconnecting';
+    if (freshDot) freshDot.classList.add('stale');
+  };
+}
+
+// ── LLM Analyst ───────────────────────────────────────────────────────────
+async function runAnalyst(gameId) {
+  const btn = document.getElementById('analyze-btn');
+  const output = document.getElementById('analyst-output');
+  if (!btn || !output) return;
+  if (state.analystRequests[gameId]) return state.analystRequests[gameId];
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>Analyzing…';
+  output.classList.remove('visible');
+
+  const request = (async () => {
+   try {
+    const resp = await fetch(`${API_BASE}/api/games/${gameId}/analyze`, {method: 'POST'});
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || resp.statusText);
+    state.analystOutput = data;
+    renderAnalystOutput(output, data);
+  } catch (err) {
+    const message = err.message.includes('429') ? 'AI rate limit reached. Try again shortly.' : err.message;
+    output.innerHTML = `<div class="analyst-error">${escapeHTML(message)}</div>`;
+    output.classList.add('visible');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = 'Re-analyze';
+  }
+  })();
+  state.analystRequests[gameId] = request;
+  try { await request; } finally { delete state.analystRequests[gameId]; }
+}
+
+function renderAnalystOutput(el, d) {
+  const direction = ['higher', 'lower', 'accurate'].includes(d.direction) ? d.direction : 'accurate';
+  const dirClass = `dir-${direction}`;
+  const directionText = direction === 'higher' ? 'Higher' : direction === 'lower' ? 'Lower' : 'Even';
+  el.innerHTML = `
+    <div class="analyst-grounding">Grounded in the displayed score, team-specific context, recent plays, player data, and verified official news available before this game state.</div>
+    <div class="analyst-headline">"${escapeHTML(d.headline)}"</div>
+    <div class="analyst-probs">
+      <div class="analyst-prob-item">
+        <div class="analyst-prob-label">Model</div>
+        <div class="analyst-prob-value" style="color:var(--muted)">${Math.round(d.model_probability*100)}%</div>
+        <div class="analyst-prob-meta">XGBoost</div>
+      </div>
+      <div class="analyst-prob-item">
+        <div class="analyst-prob-label">Analyst</div>
+        <div class="analyst-prob-value ${dirClass}">${Math.round(d.analyst_probability*100)}%</div>
+        <div class="analyst-prob-meta ${dirClass}">${escapeHTML(directionText)} · ${escapeHTML(d.confidence)} confidence</div>
+      </div>
+    </div>
+    <div class="analyst-factors">
+      <div class="analyst-factors-title">Key Factors</div>
+      ${d.key_factors.map(f => `<div class="analyst-factor">${escapeHTML(f)}</div>`).join('')}
+    </div>
+    ${newsItemsHTML(d.news_items)}
+    <div class="analyst-reasoning">${escapeHTML(d.reasoning)}</div>`;
+  el.classList.add('visible');
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+function periodLabel(p) {
+  if (!p) return '';
+  return p <= 4 ? `Q${p}` : `OT${p-4}`;
+}
+
+function formatClock(seconds, period) {
+  if (seconds === undefined || seconds === null) return '';
+  // Feature vectors store seconds remaining in the whole game. Convert to
+  // the current period clock for the score header and replay controls.
+  const periodSeconds = period >= 1 && period <= 4
+    ? seconds - (4 - period) * 720
+    : seconds;
+  const safeSeconds = Math.max(0, periodSeconds);
+  const m = Math.floor(safeSeconds / 60);
+  const s = Math.floor(safeSeconds % 60);
+  return `${m}:${String(s).padStart(2,'0')}`;
+}
+
+function formatDate(dateStr) {
+  const d = new Date(dateStr + 'T12:00:00');
+  return d.toLocaleDateString('en-US', {weekday: 'short', month: 'short', day: 'numeric', year: 'numeric'});
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+{
+  "buildCommand": "node scripts/build-vercel-frontend.mjs",
+  "outputDirectory": "dist",
+  "cleanUrls": true,
+  "rewrites": [
+    {
+      "source": "/rd",
+      "destination": "/rd.html"
+    },
+    {
+      "source": "/index.html",
+      "destination": "/"
+    }
+  ]
+}

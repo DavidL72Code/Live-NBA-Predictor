@@ -40,6 +40,15 @@ class Settings(BaseSettings):
     postgres_dsn: str | None = None
     mlflow_tracking_uri: str | None = None
 
+    # Phase 4: LLM analyst
+    gemini_api_key: str | None = None
+    analyst_model: str = "gemini-3.1-flash-lite"
+    analyst_mlflow_run_id: str | None = None
+
+    # Web deployment
+    # Comma-separated browser origins allowed to call the backend API.
+    cors_allowed_origins: str = "http://127.0.0.1:8765,http://localhost:8765,null"
+
 
 @lru_cache
 def get_settings() -> Settings:

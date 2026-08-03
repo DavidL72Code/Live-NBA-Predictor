@@ -15,7 +15,7 @@ from collections import deque
 from collections.abc import Iterable
 
 from nba_winprob import gametime
-from nba_winprob.schemas import FeatureVector, GameEvent
+from nba_winprob.schemas import FeatureVector, GameEvent, TeamGameContext
 
 DEFAULT_RUN_WINDOW_SECONDS = 180.0  # "recent scoring run" = last 3 minutes of game time
 
@@ -28,9 +28,17 @@ class GameState:
     matter how long the game runs.
     """
 
-    def __init__(self, game_id: str, run_window_seconds: float = DEFAULT_RUN_WINDOW_SECONDS):
+    def __init__(
+        self,
+        game_id: str,
+        run_window_seconds: float = DEFAULT_RUN_WINDOW_SECONDS,
+        home_context: TeamGameContext | None = None,
+        away_context: TeamGameContext | None = None,
+    ):
         self.game_id = game_id
         self.run_window_seconds = run_window_seconds
+        self._home_ctx = home_context or TeamGameContext()
+        self._away_ctx = away_context or TeamGameContext()
         self._last_home = 0
         self._last_away = 0
         # (elapsed_seconds, home_delta, away_delta) for scoring events in the window
@@ -91,22 +99,43 @@ class GameState:
             run_away=run_away,
             run_diff=run_home - run_away,
             is_overtime=event.period > gametime.REGULATION_PERIODS,
+            home_win_pct=self._home_ctx.win_pct,
+            home_avg_margin=self._home_ctx.avg_margin,
+            home_streak=self._home_ctx.streak,
+            away_win_pct=self._away_ctx.win_pct,
+            away_avg_margin=self._away_ctx.avg_margin,
+            away_streak=self._away_ctx.streak,
+            home_venue_win_pct=self._home_ctx.venue_win_pct,
+            home_venue_avg_margin=self._home_ctx.venue_avg_margin,
+            away_venue_win_pct=self._away_ctx.venue_win_pct,
+            away_venue_avg_margin=self._away_ctx.venue_avg_margin,
+            home_elo_rating=self._home_ctx.elo_rating,
+            away_elo_rating=self._away_ctx.elo_rating,
         )
 
 
 def compute_game_features(
     events: Iterable[GameEvent],
     run_window_seconds: float = DEFAULT_RUN_WINDOW_SECONDS,
+    home_context: TeamGameContext | None = None,
+    away_context: TeamGameContext | None = None,
 ) -> list[FeatureVector]:
     """Offline/batch path: replay a game's events through ``GameState``.
 
     Events must be in game order (as emitted by the normalizer).
+    ``home_context`` and ``away_context`` carry pre-game team strength data
+    (win%, avg margin, streak) computed from the season game log.
     """
     state: GameState | None = None
     vectors: list[FeatureVector] = []
     for event in events:
         if state is None:
-            state = GameState(event.game_id, run_window_seconds=run_window_seconds)
+            state = GameState(
+                event.game_id,
+                run_window_seconds=run_window_seconds,
+                home_context=home_context,
+                away_context=away_context,
+            )
         vectors.append(state.update(event))
     return vectors
 

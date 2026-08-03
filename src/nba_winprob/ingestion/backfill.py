@@ -13,6 +13,7 @@ import logging
 from pathlib import Path
 
 from nba_winprob.ingestion.client import NBAStatsClient
+from nba_winprob.ingestion.team_context import build_season_context
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,38 @@ def backfill_season(
     return counts
 
 
+def backfill_team_context(
+    client: NBAStatsClient,
+    season: str,
+    output_dir: Path,
+    season_type: str = "Regular Season",
+) -> int:
+    """Fetch league game log and save pre-game team context for a season.
+
+    Writes ``<output_dir>/<season>/team_context.json``.  Existing files are
+    overwritten so the context is always up-to-date with the full season.
+    Returns the number of games with complete (home + away) context.
+    """
+    season_dir = output_dir / season.replace("/", "-")
+    season_dir.mkdir(parents=True, exist_ok=True)
+    context_path = season_dir / "team_context.json"
+
+    rows = client.get_league_game_log(season, season_type=season_type)
+    context = build_season_context(rows)
+
+    serializable = {
+        game_id: {role: ctx.model_dump() for role, ctx in roles.items()}
+        for game_id, roles in context.items()
+    }
+    context_path.write_text(json.dumps(serializable))
+    complete = sum(1 for v in context.values() if "home" in v and "away" in v)
+    logger.info(
+        "%s: wrote team context for %d games (%d complete) to %s",
+        season, len(context), complete, context_path,
+    )
+    return complete
+
+
 def iter_raw_game_files(raw_dir: Path) -> list[Path]:
     """All raw game JSON files under a backfill directory, sorted for determinism."""
-    return sorted(raw_dir.rglob("*.json"))
+    return sorted(p for p in raw_dir.rglob("*.json") if p.name != "team_context.json")

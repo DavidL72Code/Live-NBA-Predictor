@@ -62,6 +62,24 @@ def parse_score_value(value) -> int | None:
         raise SchemaDriftError(f"unparseable score value: {value!r}") from exc
 
 
+def _optional_str(action: dict, key: str) -> str | None:
+    value = action.get(key)
+    if value is None:
+        return None
+    value = str(value).strip()
+    return value or None
+
+
+def _optional_int(action: dict, key: str) -> int | None:
+    value = action.get(key)
+    if value is None or not str(value).strip():
+        return None
+    try:
+        return int(float(str(value).strip()))
+    except ValueError:
+        return None
+
+
 def _event_type(action_type: str, sub_type: str) -> EventType:
     action_type = (action_type or "").strip().lower()
     if action_type == "period":
@@ -110,6 +128,14 @@ def normalize_playbyplay(raw: dict) -> list[GameEvent]:
                 home_score=home_score,
                 away_score=away_score,
                 description=description or None,
+                team_id=_optional_str(action, "teamId"),
+                team_tricode=_optional_str(action, "teamTricode"),
+                person_id=_optional_str(action, "personId"),
+                player_name=_optional_str(action, "playerName"),
+                action_type=_optional_str(action, "actionType"),
+                sub_type=_optional_str(action, "subType"),
+                shot_result=_optional_str(action, "shotResult"),
+                shot_value=_optional_int(action, "shotValue"),
             )
         )
     return events

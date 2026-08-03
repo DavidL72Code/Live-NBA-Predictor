@@ -1,20 +1,19 @@
 """Stream processor.
 
 Consumes ``GameEvent`` messages from the ``nba.game.events`` topic, feeds
-each one through its per-game ``GameState`` accumulator, and publishes the
-resulting ``FeatureVector`` to the ``nba.game.features`` topic.
-
-This is where the training-serving consistency guarantee pays off: the same
-``GameState.update()`` call used by the offline ``build-features`` CLI is
-what runs here, live, one event at a time.
+each one through its per-game ``GameState`` accumulator, publishes the
+resulting ``FeatureVector`` to the ``nba.game.features`` topic, and writes
+it to the Redis online store so the serving layer can read it immediately.
 
 Design:
 - One ``GameState`` per game, lazily created on the first event.
 - Out-of-order events within a game are tolerated by the ``GameState``
   monotonic-clock clamping added in Phase 1.
-- At-least-once delivery: Kafka offsets are committed after the feature
-  is published downstream, so a crash between consume and publish
-  replays the event. Features are idempotent (same event → same vector).
+- At-least-once delivery: Kafka offsets are committed after both the
+  Kafka publish and the Redis write complete.
+- Redis is optional at startup: if NBA_WINPROB_REDIS_URL is unreachable,
+  the processor logs a warning and continues (features still flow through
+  Kafka; serving degrades gracefully).
 """
 
 from __future__ import annotations
@@ -24,6 +23,7 @@ import signal
 
 from nba_winprob.config import get_settings
 from nba_winprob.features import GameState
+from nba_winprob.schemas import FeatureVector
 from nba_winprob.streaming.serde import deserialize_event, serialize_feature
 
 logger = logging.getLogger(__name__)
@@ -32,12 +32,12 @@ logger = logging.getLogger(__name__)
 def process_message(
     raw_value: bytes,
     states: dict[str, GameState],
-) -> tuple[bytes, bytes] | None:
-    """Pure processing step — no Kafka I/O.
+) -> tuple[bytes, bytes, FeatureVector] | None:
+    """Pure processing step — no Kafka or Redis I/O.
 
     Deserializes one raw Kafka value, routes it through the correct GameState,
-    and returns (key, value) bytes ready to produce, or None on parse error.
-    Extracted so unit tests can call it without a broker.
+    and returns (key, value, feature) or None on parse error.
+    Extracted so unit tests can call it without a broker or Redis.
     """
     try:
         event = deserialize_event(raw_value)
@@ -50,7 +50,8 @@ def process_message(
         logger.info("new game started: %s", event.game_id)
 
     feature = states[event.game_id].update(event)
-    return serialize_feature(feature)
+    key, value = serialize_feature(feature)
+    return key, value, feature
 
 
 class StreamProcessor:
@@ -69,16 +70,28 @@ class StreamProcessor:
         self._group_id = settings.kafka_consumer_group
         self._states: dict[str, GameState] = {}
         self._running = False
+        self._online_store = None
+
+    def _init_online_store(self):
+        from nba_winprob.store.online import OnlineStore
+
+        store = OnlineStore()
+        if store.ping():
+            logger.info("Redis online store connected")
+            self._online_store = store
+        else:
+            logger.warning("Redis unreachable — features will not be written to online store")
 
     def run(self) -> None:
         from kafka import KafkaConsumer, KafkaProducer  # lazy: not needed in tests
 
+        self._init_online_store()
         consumer = KafkaConsumer(
             self._events_topic,
             bootstrap_servers=self._bootstrap,
             group_id=self._group_id,
             auto_offset_reset="earliest",
-            enable_auto_commit=False,   # manual commit after downstream publish
+            enable_auto_commit=False,   # manual commit after all downstream writes
         )
         producer = KafkaProducer(bootstrap_servers=self._bootstrap)
 
@@ -92,9 +105,14 @@ class StreamProcessor:
                     break
                 result = process_message(msg.value, self._states)
                 if result is not None:
-                    key, value = result
+                    key, value, feature = result
                     producer.send(self._features_topic, key=key, value=value)
                     producer.flush()
+                    if self._online_store is not None:
+                        try:
+                            self._online_store.write(feature)
+                        except Exception as exc:
+                            logger.warning("Redis write failed: %s", exc)
                 consumer.commit()
         finally:
             consumer.close()

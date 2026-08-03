@@ -60,6 +60,64 @@ nba-winprob build-features --raw-dir data/raw --output data/features/features.pa
 Raw payloads land in `data/raw/<season>/<game_id>.json` verbatim, so
 normalization and feature changes can be re-run without re-hitting NBA.com.
 
+## Deployment split
+
+The app can be deployed as a static Vercel frontend with a Hugging Face Spaces
+backend.
+
+### Vercel frontend
+
+Vercel uses [vercel.json](vercel.json) to build the static UI into `dist/`.
+Set this Vercel environment variable (the build also has this as its default):
+
+```bash
+NBA_WINPROB_PUBLIC_API_BASE=https://davidl72code-swoosh-ai.hf.space
+```
+
+That value is written into `dist/config.js`, and the browser uses it for every
+`/api/...` fetch and live SSE stream. Local FastAPI testing still uses
+same-origin `http://127.0.0.1:8765/`.
+
+### Hugging Face backend
+
+Create a **Docker Space** named `SWOOSH_AI` and deploy this repository. The included
+[Dockerfile](Dockerfile) starts FastAPI on port `7860`, which is the Hugging
+Face Spaces web port.
+
+Set these Hugging Face Space secrets or variables:
+
+```bash
+NBA_WINPROB_GEMINI_API_KEY=...
+NBA_WINPROB_ANALYST_MLFLOW_RUN_ID=...
+NBA_WINPROB_MLFLOW_TRACKING_URI=sqlite:///mlflow.db
+NBA_WINPROB_CORS_ALLOWED_ORIGINS=https://live-nba-predictor.vercel.app,http://127.0.0.1:8765,http://localhost:8765
+```
+
+Use the real Vercel app URL in `NBA_WINPROB_CORS_ALLOWED_ORIGINS`; otherwise
+the browser will block frontend calls to the Hugging Face backend.
+
+### Render alternative
+
+Render can run the same Dockerfile as a Web Service. Create a Web Service from
+the repository, choose the Free instance for testing, and leave the Dockerfile
+as the runtime. The container now uses Render's `PORT` automatically.
+
+Set these Render environment variables:
+
+```bash
+NBA_WINPROB_GEMINI_API_KEY=...
+NBA_WINPROB_ANALYST_MLFLOW_RUN_ID=...
+NBA_WINPROB_MLFLOW_TRACKING_URI=sqlite:///mlflow.db
+NBA_WINPROB_CORS_ALLOWED_ORIGINS=https://live-nba-predictor.vercel.app
+```
+
+Free Render services have 512 MB RAM, 0.1 CPU, sleep after 15 minutes without
+traffic, and lose local filesystem changes when they restart. That makes Free
+Render suitable for a demo, but not reliable for the live polling pipeline or
+SQLite/MLflow persistence. Keep the trained model in deployable artifact
+storage and use an external Redis/MLflow store, or move to a paid instance for
+the full live backend.
+
 ## Tests
 
 ```bash

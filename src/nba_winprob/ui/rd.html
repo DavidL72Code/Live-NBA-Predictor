@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>R&amp;D · NBA Win Probability</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap');
+  :root { --navy:#071d41; --blue:#174a9c; --red:#c8102e; --ink:#10233f; --muted:#687990; --line:#d8e0ea; --paper:#f4f6f9; --white:#fff; --green:#16845a; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--paper); color:var(--ink); font-family:Manrope,system-ui,sans-serif; min-height:100vh; }
+  a { color:inherit; }
+  header { min-height:64px; padding:13px clamp(18px,4vw,56px); display:flex; align-items:center; gap:14px; position:sticky; top:0; z-index:10; background:rgba(7,29,65,.97); border-bottom:4px solid var(--red); box-shadow:0 5px 18px rgba(7,29,65,.12); }
+  .brand { display:flex; align-items:center; gap:11px; color:#fff; text-decoration:none; }
+  .nba-mark { width:29px; height:35px; border:1px solid rgba(255,255,255,.34); border-radius:3px; display:grid; place-items:center; color:#fff; background:var(--red); font:800 11px 'Barlow Condensed',sans-serif; }
+  .brand-title { font:700 21px/.85 'Barlow Condensed',sans-serif; letter-spacing:1px; text-transform:uppercase; }
+  .brand-title span { display:block; margin-top:5px; color:#b9d8ff; font:500 9px 'DM Mono',monospace; letter-spacing:1.5px; }
+  .back { margin-left:auto; color:#b9d8ff; text-decoration:none; font:700 10px 'DM Mono',monospace; letter-spacing:1px; text-transform:uppercase; }
+  .back:hover { color:#fff; }
+  main { width:min(1120px, calc(100% - 36px)); margin:0 auto; padding:clamp(36px,7vw,82px) 0 90px; }
+  .eyebrow { color:var(--red); font:700 10px 'DM Mono',monospace; letter-spacing:2px; text-transform:uppercase; }
+  h1 { max-width:790px; margin-top:14px; font:700 clamp(48px,8vw,92px)/.86 'Barlow Condensed',sans-serif; letter-spacing:-1px; text-transform:uppercase; }
+  .dek { max-width:660px; margin-top:22px; color:var(--muted); font-size:15px; line-height:1.75; }
+  .hero-grid { display:grid; grid-template-columns:1.3fr .7fr; gap:18px; margin-top:36px; }
+  .hero-card { padding:22px; background:var(--navy); color:#fff; border-top:3px solid var(--red); }
+  .hero-card-top { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+  .production-badge { display:inline-flex; align-items:center; gap:6px; padding:5px 8px; color:#d8f5e8; background:rgba(22,132,90,.25); border:1px solid rgba(170,235,205,.38); font:700 9px 'DM Mono',monospace; letter-spacing:.7px; text-transform:uppercase; white-space:nowrap; }
+  .production-badge::before { content:''; width:6px; height:6px; border-radius:50%; background:#5be19e; box-shadow:0 0 0 3px rgba(91,225,158,.16); }
+  .hero-card-label { color:#b9d8ff; font:700 9px 'DM Mono',monospace; letter-spacing:1.4px; text-transform:uppercase; }
+  .hero-card strong { display:block; margin-top:9px; font:700 30px/.95 'Barlow Condensed',sans-serif; }
+  .hero-card p { margin-top:9px; color:#d5e1f0; font-size:12px; line-height:1.55; }
+  .plain-summary { margin-top:18px; padding:16px; background:#fff; border:1px solid var(--line); border-left:4px solid var(--red); }
+  .plain-summary h2 { font:800 24px/.95 'Barlow Condensed',sans-serif; text-transform:uppercase; }
+  .plain-summary p { margin-top:8px; color:var(--muted); font-size:13px; line-height:1.6; max-width:780px; }
+  .metric-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:1px; background:var(--line); border:1px solid var(--line); }
+  .metric { padding:16px; background:var(--white); }
+  .metric-label { display:block; color:var(--muted); font:700 9px 'DM Mono',monospace; letter-spacing:.8px; text-transform:uppercase; }
+  .metric-value { display:block; margin-top:7px; color:var(--blue); font:700 28px 'Barlow Condensed',sans-serif; }
+  .metric-note { display:block; margin-top:3px; color:var(--muted); font-size:10px; line-height:1.35; }
+  .section-head { display:flex; align-items:end; justify-content:space-between; gap:18px; margin:58px 0 16px; border-bottom:2px solid var(--navy); padding-bottom:10px; }
+  h2 { font:700 32px/.95 'Barlow Condensed',sans-serif; text-transform:uppercase; letter-spacing:.2px; }
+  .section-head p { color:var(--muted); font-size:11px; text-align:right; }
+  .phase-nav { display:flex; gap:7px; margin:0 0 16px 50px; overflow-x:auto; padding:2px 0 7px; scrollbar-width:thin; }
+  .phase-nav a { flex:0 0 auto; padding:7px 9px; color:var(--muted); background:#e9eef5; border:1px solid var(--line); text-decoration:none; font:700 9px 'DM Mono',monospace; letter-spacing:.6px; text-transform:uppercase; transition:color .18s ease, background .18s ease, border-color .18s ease; }
+  .phase-nav a:hover, .phase-nav a:focus-visible { color:var(--navy); background:#fff; border-color:#9eb6d6; }
+  .timeline { position:relative; display:grid; gap:12px; }
+  .timeline::before { content:''; position:absolute; left:17px; top:16px; bottom:16px; width:2px; background:var(--line); }
+  .phase { position:relative; display:grid; grid-template-columns:36px 1fr; gap:14px; opacity:0; animation:phase-in .48s cubic-bezier(.22,1,.36,1) forwards; }
+  .phase:nth-child(1) { animation-delay:.08s; }
+  .phase:nth-child(2) { animation-delay:.16s; }
+  .phase:nth-child(3) { animation-delay:.24s; }
+  .phase:nth-child(4) { animation-delay:.32s; }
+  .phase:nth-child(5) { animation-delay:.40s; }
+  @keyframes phase-in { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
+  .phase-index { z-index:1; width:36px; height:36px; display:grid; place-items:center; background:var(--red); color:#fff; border:4px solid var(--paper); font:700 11px 'DM Mono',monospace; transition:transform .22s cubic-bezier(.22,1,.36,1), background .22s ease, box-shadow .22s ease; }
+  .phase-body { padding:17px 19px; background:var(--white); border:1px solid var(--line); border-top:3px solid var(--blue); transition:border-color .22s ease, box-shadow .22s ease, transform .22s cubic-bezier(.22,1,.36,1); }
+  .phase.is-current .phase-index { background:var(--navy); transform:scale(1.12); box-shadow:0 0 0 4px rgba(200,16,46,.14); }
+  .phase.is-current .phase-body { border-top-color:var(--red); box-shadow:0 10px 24px rgba(7,29,65,.1); transform:translateX(4px); }
+  .phase-body h3 { font:700 25px/.95 'Barlow Condensed',sans-serif; }
+  .phase-tag { display:inline-block; margin-left:7px; color:var(--blue); font:700 9px 'DM Mono',monospace; letter-spacing:.8px; text-transform:uppercase; vertical-align:middle; }
+  .phase-body p { margin-top:9px; color:var(--muted); font-size:12px; line-height:1.65; }
+  .phase-body ul { display:grid; gap:5px; margin:11px 0 0 17px; color:var(--ink); font-size:12px; line-height:1.45; }
+  .phase-result { margin-top:13px; padding-top:10px; border-top:1px solid var(--line); color:var(--muted); font:11px 'DM Mono',monospace; }
+  .phase-result strong { color:var(--green); }
+  .evidence { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
+  .evidence-card { padding:20px; background:var(--white); border:1px solid var(--line); }
+  .evidence-card h3 { font:700 24px/.95 'Barlow Condensed',sans-serif; }
+  .evidence-card p { margin-top:9px; color:var(--muted); font-size:12px; line-height:1.65; }
+  .benchmark { padding:20px; background:var(--navy); color:#fff; }
+  .benchmark-head { display:flex; align-items:end; justify-content:space-between; gap:18px; margin-bottom:18px; }
+  .benchmark h3 { font:700 27px/.95 'Barlow Condensed',sans-serif; text-transform:uppercase; }
+  .benchmark-head p { max-width:410px; color:#b9d8ff; font-size:11px; line-height:1.5; text-align:right; }
+  .benchmark-legend { display:flex; justify-content:space-between; margin-bottom:8px; color:#9fb4d1; font:9px 'DM Mono',monospace; letter-spacing:.7px; text-transform:uppercase; }
+  .benchmark-row { display:grid; grid-template-columns:180px 1fr 56px; align-items:center; gap:14px; margin-top:11px; }
+  .benchmark-label { color:#fff; font:600 11px Manrope,sans-serif; }
+  .benchmark-label span { display:block; margin-top:3px; color:#9fb4d1; font:9px 'DM Mono',monospace; text-transform:uppercase; }
+  .benchmark-track { height:9px; background:#19365e; overflow:hidden; }
+  .benchmark-fill { width:var(--bar); height:100%; background:#80aef0; transform-origin:left center; animation:bar-in .75s cubic-bezier(.22,1,.36,1) both; }
+  .benchmark-row.is-best .benchmark-fill { background:var(--red); }
+  .benchmark-value { color:#fff; font:700 15px 'DM Mono',monospace; text-align:right; }
+  @keyframes bar-in { from { transform:scaleX(0); } to { transform:scaleX(1); } }
+  .benchmark-note { margin-top:15px; color:#9fb4d1; font:10px/1.5 'DM Mono',monospace; }
+  .technical-list { display:grid; gap:8px; }
+  .technical-list details { background:var(--white); border:1px solid var(--line); }
+  .technical-list summary { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:15px 18px; cursor:pointer; list-style:none; font:700 18px/.95 'Barlow Condensed',sans-serif; }
+  .technical-list summary::-webkit-details-marker { display:none; }
+  .technical-list summary::after { content:'+'; color:var(--red); font:500 22px/.7 'DM Mono',monospace; }
+  .technical-list details[open] summary::after { content:'−'; }
+  .technical-list details[open] summary { border-bottom:1px solid var(--line); }
+  .technical-list details p { max-width:780px; padding:14px 18px 17px; color:var(--muted); font-size:12px; line-height:1.7; }
+  .technical-list .final-detail { background:#eaf5ef; border-color:#b9dfce; }
+  .technical-list .final-detail summary { color:#145c40; }
+  .technical-list .final-detail summary::after { color:var(--green); }
+  .technical-list .final-detail[open] summary { border-bottom-color:#b9dfce; }
+  .technical-list .final-detail p { color:#145c40; }
+  .feature-list { display:flex; flex-wrap:wrap; gap:6px; margin-top:13px; }
+  .feature { padding:6px 8px; background:#edf4ff; color:var(--blue); font:500 10px 'DM Mono',monospace; }
+  .final-note { margin-top:18px; padding:18px 20px; background:#eaf5ef; border:1px solid #b9dfce; color:#145c40; font-size:12px; line-height:1.6; }
+  footer { margin-top:58px; padding-top:13px; border-top:1px solid var(--line); color:var(--muted); font:10px 'DM Mono',monospace; letter-spacing:.4px; }
+  @media (max-width:700px) { .hero-grid,.evidence { grid-template-columns:1fr; } .metric-grid { grid-template-columns:1fr 1fr; } .section-head { align-items:flex-start; flex-direction:column; } .section-head p { text-align:left; } .phase-nav { margin-left:0; } .benchmark-head { align-items:flex-start; flex-direction:column; } .benchmark-head p { text-align:left; } .benchmark-row { grid-template-columns:1fr 54px; gap:7px 10px; } .benchmark-label { grid-column:1 / -1; } .benchmark-track { grid-column:1; } .benchmark-value { grid-column:2; grid-row:2; } .hero-card-top { align-items:flex-start; flex-direction:column; } }
+  .phase-body { transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease; }
+  .phase-body:hover { border-color: #9eb6d6; box-shadow: 0 8px 18px rgba(7,29,65,.08); transform: translateY(-1px); }
+  @media (prefers-reduced-motion:reduce) { .phase { opacity:1; animation:none; } .phase-body, .phase-index { transition:none; } .phase.is-current .phase-index, .phase.is-current .phase-body { transform:none; } .benchmark-fill { animation:none; } }
+</style>
+</head>
+<body>
+<header>
+  <a class="brand" href="/"><span class="nba-mark">NBA</span><span class="brand-title">Win Probability<span>Research &amp; development</span></span></a>
+  <a class="back" href="/">Back to games</a>
+</header>
+<main>
+  <div class="eyebrow">R&amp;D / model record</div>
+  <h1>How the model<br>earned its place.</h1>
+
+  <div class="hero-grid">
+    <div class="hero-card"><div class="hero-card-top"><span class="hero-card-label">Current production decision</span><span class="production-badge">In production</span></div><strong>Raw 20-feature XGBoost</strong><p>Home/road splits and Elo improved the model. Post-hoc calibration was tested and rejected on the active holdout because it made the probability score worse.</p></div>
+    <div class="metric-grid">
+      <div class="metric"><span class="metric-label">Test games</span><span class="metric-value" data-counter="984" data-decimals="0">0</span><span class="metric-note">Held out from training</span></div>
+      <div class="metric"><span class="metric-label">Brier</span><span class="metric-value" data-counter="0.164" data-decimals="3">0.000</span><span class="metric-note">Lower is better</span></div>
+      <div class="metric"><span class="metric-label">ROC-AUC</span><span class="metric-value" data-counter="0.833" data-decimals="3">0.000</span><span class="metric-note">Ranking quality</span></div>
+    </div>
+  </div>
+  <section class="plain-summary">
+    <h2>For non-technical users</h2>
+    <p>We kept this model because it gave the most reliable win chances on games it had never seen before. We tested several ways to adjust its percentages, but they made the results less reliable, so we kept the original version. The AI analyst is separate: it can explain what may be affecting a game using verified information, but it does not change the model’s percentage.</p>
+  </section>
+
+  <div class="section-head"><h2>The build log</h2><p>From baseline to current model</p></div>
+  <nav class="phase-nav" aria-label="Model phases"><a href="#phase-01">01 Baseline</a><a href="#phase-02">02 Calibration</a><a href="#phase-03">03 Game-level</a><a href="#phase-04">04 Team context</a><a href="#phase-05">05 Temperature</a></nav>
+  <div class="timeline">
+    <article class="phase" id="phase-01"><div class="phase-index">01</div><div class="phase-body"><h3>Baseline: XGBoost game state model <span class="phase-tag">14 features</span></h3><p>The first benchmark was a raw XGBoost model trained on score, clock, score differential, recent scoring runs, overtime state, and season-level team context.</p><ul><li>Outcome: a usable live probability engine.</li><li>Limitation: generic home-court assumptions could miss team-specific venue performance.</li></ul><div class="phase-result">Baseline method: <strong>14-feature XGBoost</strong> · 0.1687 Brier</div></div></article>
+    <article class="phase" id="phase-02"><div class="phase-index">02</div><div class="phase-body"><h3>Calibration experiments <span class="phase-tag">isotonic</span></h3><p>Isotonic regression was tested to lift or lower probability ranges where historical outcomes suggested the raw model was miscalibrated.</p><ul><li>Global row-level calibration over-weighted repeated plays from the same game.</li><li>Q4-only calibration created a distribution mismatch when applied to all quarters.</li></ul><div class="phase-result">Result: no reliable improvement over raw probabilities.</div></div></article>
+    <article class="phase" id="phase-03"><div class="phase-index">03</div><div class="phase-body"><h3>Game-level calibration <span class="phase-tag">one game / one outcome</span></h3><p>Each game was reduced to one average prediction and one final outcome so correlated play rows would not look like independent examples.</p><ul><li>This fixed the independence problem during fitting.</li><li>But game-average probabilities occupy a narrow range and were later applied to wide per-play probabilities.</li></ul><div class="phase-result">Result: Brier worsened to <strong>0.1897</strong>; rejected.</div></div></article>
+    <article class="phase" id="phase-04"><div class="phase-index">04</div><div class="phase-body"><h3>Team context upgrade <span class="phase-tag">current model</span></h3><p>The model gained team-specific context rather than treating home court as one universal effect.</p><ul><li>Home and road win percentages.</li><li>Home and road average margins.</li><li>Opponent-adjusted Elo ratings.</li></ul><div class="phase-result">Result: raw test Brier <strong>0.1644</strong>; ROC-AUC <strong>0.8332</strong>.</div></div></article>
+    <article class="phase" id="phase-05"><div class="phase-index">05</div><div class="phase-body"><h3>Temperature scaling after isotonic <span class="phase-tag">not shipped</span></h3><p>A one-parameter temperature adjustment was tested on the isotonic-calibrated setup. It preserved ranking better than a free-form remap, but did not beat the raw 20-feature model.</p><div class="phase-result">Result: <strong>0.1645 Brier</strong> vs raw 0.1644; raw stays in production.</div></div></article>
+  </div>
+
+  <div class="section-head"><h2>Benchmark, at a glance</h2></div>
+  <section class="benchmark" aria-label="Brier score benchmark comparison">
+    <div class="benchmark-head"><h3>Probability quality</h3><p>Lower Brier means better probability quality. Bars share one scale so the small but meaningful differences stay visible. The red bar marks the production choice.</p></div>
+    <div class="benchmark-legend"><span>0.15 · stronger</span><span>0.19 · weaker</span></div>
+    <div class="benchmark-row"><div class="benchmark-label">Baseline XGBoost <span>raw · 14 features</span></div><div class="benchmark-track"><div class="benchmark-fill" style="--bar:47%"></div></div><div class="benchmark-value">.1687</div></div>
+    <div class="benchmark-row"><div class="benchmark-label">Isotonic <span>post-hoc calibration</span></div><div class="benchmark-track"><div class="benchmark-fill" style="--bar:37.6%"></div></div><div class="benchmark-value">.1650</div></div>
+    <div class="benchmark-row"><div class="benchmark-label">Temperature scaling <span>on isotonic · not shipped</span></div><div class="benchmark-track"><div class="benchmark-fill" style="--bar:36.2%"></div></div><div class="benchmark-value">.1645</div></div>
+    <div class="benchmark-row is-best"><div class="benchmark-label">Raw XGBoost <span>production · 20 features</span></div><div class="benchmark-track"><div class="benchmark-fill" style="--bar:36%"></div></div><div class="benchmark-value">.1644</div></div>
+    <div class="benchmark-note">The bar length is a visual comparison, not a percentage score. The winner is selected by the exact reported Brier values.</div>
+  </section>
+
+  <div class="section-head"><h2>What the model actually sees</h2><p>20 inputs at each game state</p></div>
+  <div class="evidence">
+    <section class="evidence-card"><h3>Live game signal</h3><p>These fields update as the game moves. The model receives one feature vector per normalized play.</p><div class="feature-list"><span class="feature">score differential</span><span class="feature">clock</span><span class="feature">recent run</span><span class="feature">score diff norm</span><span class="feature">overtime</span></div></section>
+    <section class="evidence-card"><h3>Team strength context</h3><p>These values are computed before the game so the prediction can recognize that teams differ in quality and venue performance.</p><div class="feature-list"><span class="feature">season W%</span><span class="feature">home/road W%</span><span class="feature">average margin</span><span class="feature">streak</span><span class="feature">Elo</span></div></section>
+  </div>
+  <div class="section-head"><h2>How the AI analyst works</h2><p>A second opinion, not a replacement model</p></div>
+  <div class="evidence">
+    <section class="evidence-card"><h3>What Gemini receives</h3><p>The analyst receives the model probability plus the current game state and supporting context. For live analysis that includes the score, clock, recent scoring run, team records, venue splits, Elo, player box-score data, fouls, and recent plays.</p><p>For pregame or historical analysis, official injury and transaction context is limited to information published before the game state.</p></section>
+    <section class="evidence-card"><h3>What it returns</h3><p>Gemini must return structured output: an analyst probability for the home team, confidence, direction versus the model, a short headline, key factors, and reasoning. The UI displays the model and analyst probabilities separately so disagreement is visible.</p><p>The analyst does not retrain the XGBoost model and does not secretly change the model’s probability.</p></section>
+  </div>
+  <div class="section-head"><h2>Technical detail</h2></div>
+  <div class="technical-list">
+    <details><summary>Why repeated play rows need care</summary><p>A single game creates many play-level predictions but only one final outcome. Treating every row as independent can make one game count hundreds of times during calibration. The benchmark therefore keeps the untouched game split and evaluates probabilities against the final game result without pretending those rows are independent games. The baseline comparison is the old raw 14-feature XGBoost model; the temperature check is the temperature-scaled version of the isotonic calibration path.</p></details>
+    <details><summary>What “home/road splits” actually means</summary><p>The feature set uses each team’s own venue history: home and road win percentage plus home and road average margin. It does not use another team’s home record as a proxy. Elo adds opponent-adjusted strength so the model can distinguish schedule quality from a simple win total.</p></details>
+    <details><summary>How to read the Brier score</summary><p>Brier score measures the distance between a predicted probability and the eventual result. A confident correct prediction scores well; a confident wrong prediction is penalized heavily. That is why the lowest value on the same untouched test set determines the production choice.</p></details>
+    <details class="final-detail"><summary>Grounding and limits</summary><p><strong>Gemini is instructed to use only facts supplied in the prompt.</strong> It must not invent injuries, trades, signings, depth, coaching tendencies, or historical claims. If official context is unavailable, it must say so. Identical requests are cached and duplicate in-flight requests are combined to reduce Gemini quota usage.</p></details>
+    <details class="final-detail"><summary>Why raw is the final choice</summary><p><strong>Calibration is not automatically better.</strong> On the active untouched test set, raw XGBoost produced the lowest Brier score. The analyst receives verified official injury and transaction context separately; those facts are not silently injected into the trained model until they beat this benchmark.</p></details>
+  </div>
+  <footer>Model record · Active run: fix-four-venue-road-elo · 3,443 train / 492 calibration / 984 test games</footer>
+</main>
+<script>
+  const requestedDate = new URLSearchParams(window.location.search).get('date');
+  const safeDate = /^\d{4}-\d{2}-\d{2}$/.test(requestedDate || '') ? requestedDate : '';
+  const backLink = document.querySelector('.back');
+  const brandLink = document.querySelector('.brand');
+  if (safeDate) {
+    const destination = `/?date=${encodeURIComponent(safeDate)}`;
+    backLink.href = destination;
+    brandLink.href = destination;
+  }
+
+  const counters = document.querySelectorAll('[data-counter]');
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  counters.forEach(counter => {
+    const target = Number(counter.dataset.counter);
+    const decimals = Number(counter.dataset.decimals || 0);
+    const format = value => value.toFixed(decimals);
+    if (reducedMotion) { counter.textContent = format(target); return; }
+    const started = performance.now();
+    const duration = 720;
+    const tick = now => {
+      const progress = Math.min(1, (now - started) / duration);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      counter.textContent = format(target * eased);
+      if (progress < 1) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+
+  const phases = document.querySelectorAll('.phase');
+  if ('IntersectionObserver' in window && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    const phaseObserver = new IntersectionObserver(entries => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) entry.target.classList.add('is-current');
+        else entry.target.classList.remove('is-current');
+      });
+    }, { rootMargin: '-18% 0px -58% 0px', threshold: 0.1 });
+    phases.forEach(phase => phaseObserver.observe(phase));
+  }
+</script>
+</body>
+</html>
