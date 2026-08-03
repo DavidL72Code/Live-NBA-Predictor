@@ -285,7 +285,10 @@ async def get_scoreboard(date_param: str = Query(default=None, alias="date")):
         games = await asyncio.to_thread(_fetch_scoreboard, target_date)
     except Exception as exc:
         logger.exception("scoreboard fetch failed for %s", target_date)
-        raise HTTPException(status_code=502, detail=str(exc))
+        detail = str(exc)
+        if "stats.nba.com" in detail and ("Read timed out" in detail or "ConnectTimeout" in detail):
+            detail = "NBA Stats did not respond from the hosting network before the 15-second limit."
+        raise HTTPException(status_code=502, detail=detail) from exc
     return {"date": target_date, "games": games}
 
 
@@ -381,7 +384,7 @@ def _fetch_scoreboard(target_date: str) -> list[dict]:
 
     payload = scoreboardv3.ScoreboardV3(
         game_date=target_date,
-        timeout=45,
+        timeout=15,
     ).get_dict()
 
     def clock_text(clock: str | None) -> str:
