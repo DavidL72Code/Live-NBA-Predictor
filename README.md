@@ -109,7 +109,12 @@ NBA_WINPROB_GEMINI_API_KEY=...
 NBA_WINPROB_ANALYST_MLFLOW_RUN_ID=...
 NBA_WINPROB_MLFLOW_TRACKING_URI=sqlite:///mlflow.db
 NBA_WINPROB_CORS_ALLOWED_ORIGINS=https://live-nba-predictor.vercel.app
+NBA_WINPROB_STATS_PROXY_URL=https://live-nba-predictor.vercel.app
+NBA_WINPROB_STATS_PROXY_TOKEN=the_same_random_value_as_vercel
 ```
+
+Set `NBA_STATS_PROXY_TOKEN` to the same random value in Vercel. The proxy is
+restricted to the NBA endpoints used by this app and is not an open relay.
 
 Free Render services have 512 MB RAM, 0.1 CPU, sleep after 15 minutes without
 traffic, and lose local filesystem changes when they restart. That makes Free

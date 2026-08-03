@@ -56,6 +56,19 @@ def _connect_sources() -> str:
     return " ".join(["'self'", *allowed])
 
 
+def _configure_stats_proxy() -> None:
+    """Route nba_api through an optional same-schema cloud proxy."""
+    proxy = (get_settings().stats_proxy_url or "").strip().rstrip("/")
+    if not proxy:
+        return
+    from nba_api.stats.library.http import NBAStatsHTTP
+
+    NBAStatsHTTP.base_url = f"{proxy}/api/nba/stats/{{endpoint}}"
+    token = (get_settings().stats_proxy_token or "").strip()
+    if token:
+        NBAStatsHTTP.headers = {**NBAStatsHTTP.headers, "X-Swoosh-Proxy-Token": token}
+
+
 app = FastAPI(title="NBA Win Probability Analyst", version="1.0")
 app.add_middleware(
     CORSMiddleware,
@@ -187,6 +200,7 @@ def _check_ai_rate_limit(request: Request) -> None:
 @lru_cache(maxsize=4)
 def _season_context(season: str) -> dict[str, dict]:
     """Load pregame team context once per season for historical serving."""
+    _configure_stats_proxy()
     from nba_winprob.ingestion.client import NBAStatsClient
     from nba_winprob.ingestion.team_context import build_season_context
 
@@ -321,6 +335,7 @@ async def get_team_games(team_code: str, season: str | None = Query(default=None
 
 @lru_cache(maxsize=8)
 def _fetch_team_schedule(team_code: str, season: str) -> list[dict]:
+    _configure_stats_proxy()
     from nba_api.stats.endpoints import scheduleleaguev2
 
     payload = scheduleleaguev2.ScheduleLeagueV2(season=season, timeout=45).get_dict()
@@ -380,6 +395,7 @@ def _fetch_team_schedule(team_code: str, season: str) -> list[dict]:
 
 
 def _fetch_scoreboard(target_date: str) -> list[dict]:
+    _configure_stats_proxy()
     from nba_api.stats.endpoints import scoreboardv3
 
     payload = scoreboardv3.ScoreboardV3(
@@ -539,6 +555,7 @@ def _fetch_history(game_id: str, refresh: bool = False) -> dict:
 
 def _load_normalized_events(game_id: str) -> tuple:
     """Fetch and normalize one game's plays from NBA Stats."""
+    _configure_stats_proxy()
     from nba_winprob.ingestion.client import NBAStatsClient
     from nba_winprob.ingestion.normalize import normalize_playbyplay
 
@@ -555,6 +572,7 @@ def _fetch_players_cached(game_id: str) -> dict:
 def _fetch_players(game_id: str) -> dict:
     from nba_winprob.ingestion.client import NBAStatsClient
 
+    _configure_stats_proxy()
     cached = _read_player_roster_cache().get(game_id)
     if cached and cached.get("lineup_source") in {"boxscore_start_position", "opening_play_by_play"}:
         return cached

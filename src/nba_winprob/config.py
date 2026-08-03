@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     # Web deployment
     # Comma-separated browser origins allowed to call the backend API.
     cors_allowed_origins: str = "http://127.0.0.1:8765,http://localhost:8765,null"
+    # Optional same-schema proxy for NBA Stats requests from cloud hosts.
+    stats_proxy_url: str | None = None
+    stats_proxy_token: str | None = None
 
 
 @lru_cache
