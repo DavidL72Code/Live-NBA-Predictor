@@ -395,14 +395,35 @@ def _fetch_team_schedule(team_code: str, season: str) -> list[dict]:
 
 
 def _fetch_scoreboard(target_date: str) -> list[dict]:
-    _configure_stats_proxy()
-    from nba_api.stats.endpoints import scoreboardv3
+    settings = get_settings()
+    proxy = (settings.stats_proxy_url or "").strip().rstrip("/")
+    if proxy:
+        import requests
 
-    payload = scoreboardv3.ScoreboardV3(
-        game_date=target_date,
-        league_id="00",
-        timeout=15,
-    ).get_dict()
+        response = requests.get(
+            f"{proxy}/api/nba/stats/scoreboardv3",
+            params={"GameDate": target_date, "LeagueID": "00"},
+            headers={"X-Swoosh-Proxy-Token": settings.stats_proxy_token or ""},
+            timeout=15,
+        )
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise RuntimeError(
+                f"NBA Stats proxy returned non-JSON HTTP {response.status_code}"
+            ) from exc
+        if response.status_code >= 400:
+            detail = payload.get("detail") or payload.get("message") or str(payload)
+            raise RuntimeError(f"NBA Stats proxy HTTP {response.status_code}: {detail}")
+    else:
+        _configure_stats_proxy()
+        from nba_api.stats.endpoints import scoreboardv3
+
+        payload = scoreboardv3.ScoreboardV3(
+            game_date=target_date,
+            league_id="00",
+            timeout=15,
+        ).get_dict()
     if "scoreboard" not in payload:
         detail = (
             payload.get("detail")
