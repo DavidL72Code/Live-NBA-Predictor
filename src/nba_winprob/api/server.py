@@ -402,6 +402,9 @@ def _fetch_scoreboard(target_date: str) -> list[dict]:
         game_date=target_date,
         timeout=15,
     ).get_dict()
+    if "scoreboard" not in payload:
+        detail = payload.get("detail") or payload.get("message") or "NBA Stats returned an unexpected payload"
+        raise RuntimeError(f"NBA Stats proxy/upstream error: {detail}")
 
     def clock_text(clock: str | None) -> str:
         value = str(clock or "").strip()
