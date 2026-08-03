@@ -13,7 +13,11 @@ module.exports = async function handler(req, res) {
     'scheduleleaguev2',
   ]);
   if (!endpoint || !allowedEndpoints.has(endpoint)) {
-    return res.status(400).json({ detail: 'Invalid NBA Stats endpoint' });
+    return res.status(400).json({
+      detail: 'Invalid NBA Stats endpoint',
+      received_path: rawPath,
+      parsed_endpoint: endpoint || null,
+    });
   }
 
   const expectedToken = process.env.NBA_STATS_PROXY_TOKEN || '';
