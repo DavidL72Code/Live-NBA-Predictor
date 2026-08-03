@@ -2,22 +2,17 @@
 // The proxy preserves NBA game IDs and response bodies; it only changes the
 // network path so Render does not call stats.nba.com directly.
 module.exports = async function handler(req, res) {
-  const rawPath = req.query.path;
-  const pathParts = Array.isArray(rawPath) ? rawPath : [rawPath];
-  // Vercel can include the parent catch-all segments in the parameter.
-  // Only the final segment is the NBA Stats endpoint name.
-  const endpoint = pathParts.filter(Boolean).at(-1);
+  const requestUrl = new URL(req.url, `https://${req.headers.host || 'localhost'}`);
+  const marker = '/api/nba/stats/';
+  const rawPath = requestUrl.pathname.split(marker)[1] || '';
+  const endpoint = rawPath.split('/').filter(Boolean).at(-1);
   const allowedEndpoints = new Set([
     'scoreboardv3', 'playbyplayv3', 'boxscoresummaryv2',
     'boxscoretraditionalv3', 'commonteamroster', 'leaguegamelog',
     'scheduleleaguev2',
   ]);
   if (!endpoint || !allowedEndpoints.has(endpoint)) {
-    return res.status(400).json({
-      detail: 'Invalid NBA Stats endpoint',
-      received_path: rawPath,
-      parsed_endpoint: endpoint || null,
-    });
+    return res.status(400).json({ detail: 'Invalid NBA Stats endpoint' });
   }
 
   const expectedToken = process.env.NBA_STATS_PROXY_TOKEN || '';
@@ -27,11 +22,7 @@ module.exports = async function handler(req, res) {
   }
 
   const upstream = new URL(`https://stats.nba.com/stats/${endpoint}`);
-  for (const [key, value] of Object.entries(req.query)) {
-    if (key === 'path') continue;
-    if (Array.isArray(value)) value.forEach(item => upstream.searchParams.append(key, String(item)));
-    else if (value != null) upstream.searchParams.set(key, String(value));
-  }
+  requestUrl.searchParams.forEach((value, key) => upstream.searchParams.append(key, value));
 
   try {
     const response = await fetch(upstream, {
