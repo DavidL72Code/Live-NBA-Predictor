@@ -4,13 +4,15 @@
 module.exports = async function handler(req, res) {
   const rawPath = req.query.path;
   const pathParts = Array.isArray(rawPath) ? rawPath : [rawPath];
-  const endpoint = pathParts.filter(Boolean).join('/');
+  // Vercel can include the parent catch-all segments in the parameter.
+  // Only the final segment is the NBA Stats endpoint name.
+  const endpoint = pathParts.filter(Boolean).at(-1);
   const allowedEndpoints = new Set([
     'scoreboardv3', 'playbyplayv3', 'boxscoresummaryv2',
     'boxscoretraditionalv3', 'commonteamroster', 'leaguegamelog',
     'scheduleleaguev2',
   ]);
-  if (!endpoint || endpoint.includes('/') || !allowedEndpoints.has(endpoint)) {
+  if (!endpoint || !allowedEndpoints.has(endpoint)) {
     return res.status(400).json({ detail: 'Invalid NBA Stats endpoint' });
   }
 
