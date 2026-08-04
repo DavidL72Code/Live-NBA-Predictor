@@ -611,6 +611,14 @@ def _fetch_players_cached(game_id: str) -> dict:
 
 
 def _fetch_players(game_id: str) -> dict:
+    if game_id.startswith("espn:"):
+        from nba_winprob.providers.espn import fetch_players
+
+        result = fetch_players(game_id)
+        result["lineup_source"] = "espn_boxscore"
+        _write_player_roster_cache(game_id, result)
+        return result
+
     from nba_winprob.ingestion.client import NBAStatsClient
 
     _configure_stats_proxy()
@@ -682,9 +690,12 @@ def _fetch_players(game_id: str) -> dict:
             "assists": player.get("assists") or 0,
             "rebounds": player.get("rebounds") or 0,
             "image_url": (
-                f"https://cdn.nba.com/headshots/nba/latest/260x190/{player_id}.png"
-                if player_id
-                else None
+                player.get("image_url")
+                or (
+                    f"https://cdn.nba.com/headshots/nba/latest/260x190/{player_id}.png"
+                    if player_id
+                    else None
+                )
             ),
             "_metric": metric(player),
         })

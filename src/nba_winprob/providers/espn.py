@@ -116,3 +116,54 @@ def fetch_events(game_id: str) -> list[GameEvent]:
     if not game_id.startswith("espn:"):
         raise ValueError(f"not an ESPN game ID: {game_id}")
     return normalize_summary(game_id.removeprefix("espn:"))
+
+
+def fetch_players(game_id: str) -> dict:
+    """Return ESPN box-score players in the server's roster shape."""
+    event_id = game_id.removeprefix("espn:")
+    payload = _summary(event_id)
+    competition = (payload.get("header", {}).get("competitions") or [{}])[0]
+    competitors = competition.get("competitors") or []
+    teams = {
+        str(team.get("id")): {
+            "side": "home" if team.get("homeAway") == "home" else "away",
+            "name": team.get("team", {}).get("abbreviation") or "",
+        }
+        for team in competitors
+    }
+    players: list[dict] = []
+    for group in payload.get("boxscore", {}).get("players", []):
+        team_id = str(group.get("team", {}).get("id") or "")
+        team = teams.get(team_id)
+        if not team:
+            continue
+        statistics = (group.get("statistics") or [{}])[0]
+        names = statistics.get("keys") or []
+        for athlete in statistics.get("athletes", []):
+            person = athlete.get("athlete") or {}
+            stats = athlete.get("stats") or []
+            values = dict(zip(names, stats, strict=False))
+            players.append({
+                "name": person.get("displayName") or "Player",
+                "player_id": person.get("id"),
+                "jersey": person.get("jersey") or "",
+                "position": (person.get("position") or {}).get("abbreviation") or "",
+                "starter": bool(athlete.get("starter")),
+                "team": team["side"],
+                "points": values.get("points") or 0,
+                "assists": values.get("assists") or 0,
+                "rebounds": values.get("rebounds") or 0,
+                "image_url": ((person.get("headshot") or {}).get("href")),
+            })
+    return {
+        "game_id": game_id,
+        "home_team": next((team["name"] for team in teams.values() if team["side"] == "home"), ""),
+        "away_team": next((team["name"] for team in teams.values() if team["side"] == "away"), ""),
+        "home_team_id": next(
+            (team_id for team_id, team in teams.items() if team["side"] == "home"), ""
+        ),
+        "away_team_id": next(
+            (team_id for team_id, team in teams.items() if team["side"] == "away"), ""
+        ),
+        "players": players,
+    }
