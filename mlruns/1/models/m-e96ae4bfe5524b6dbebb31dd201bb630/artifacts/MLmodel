@@ -1,0 +1,22 @@
+artifact_path: /Users/davidle/Documents/Live_Basketball_Predictor/mlruns/1/models/m-e96ae4bfe5524b6dbebb31dd201bb630/artifacts
+flavors:
+  python_function:
+    data: model.ubj
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.xgboost
+    python_version: 3.13.11
+  xgboost:
+    code: null
+    data: model.ubj
+    model_class: xgboost.sklearn.XGBClassifier
+    model_format: ubj
+    xgb_version: 3.3.0
+mlflow_version: 3.14.0
+model_id: m-e96ae4bfe5524b6dbebb31dd201bb630
+model_size_bytes: 276638
+model_uuid: m-e96ae4bfe5524b6dbebb31dd201bb630
+prompts: null
+run_id: cba0bbd311c643598e11bd480ac5b5b5
+utc_time_created: '2026-07-20 04:22:14.397482'
