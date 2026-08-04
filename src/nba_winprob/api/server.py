@@ -589,6 +589,12 @@ def _fetch_history(game_id: str, refresh: bool = False) -> dict:
 
 
 def _load_normalized_events(game_id: str) -> tuple:
+    """Fetch and normalize one game's plays from its selected provider."""
+    if game_id.startswith("espn:"):
+        from nba_winprob.providers.espn import fetch_events
+
+        return tuple(fetch_events(game_id))
+
     """Fetch and normalize one game's plays from NBA Stats."""
     _configure_stats_proxy()
     from nba_winprob.ingestion.client import NBAStatsClient
