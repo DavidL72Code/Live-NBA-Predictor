@@ -1317,7 +1317,9 @@ function renderRosterIntro(game, mode = 'live', players = null) {
 function rosterSideHTML(game, side, players = []) {
   const abbr = side === 'home' ? game.home_team : game.away_team;
   const source = state.players?.lineup_source;
-  const verified = source === 'boxscore_start_position' || source === 'opening_play_by_play';
+  const verified = source === 'boxscore_start_position'
+    || source === 'opening_play_by_play'
+    || source === 'espn_boxscore';
   const label = verified
     ? (side === 'home' ? 'Home starting five' : 'Away starting five')
     : (side === 'home' ? 'Home roster preview' : 'Away roster preview');

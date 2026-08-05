@@ -91,7 +91,8 @@ async def security_headers(request: Request, call_next):
     if request.url.path in {"/", "/rd.html"}:
         response.headers["Content-Security-Policy"] = (
             "default-src 'self' https://cdn.nba.com https://fonts.googleapis.com https://fonts.gstatic.com; "
-            "img-src 'self' data: https://cdn.nba.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "img-src 'self' data: https://cdn.nba.com https://a.espncdn.com; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
             f"font-src 'self' https://fonts.gstatic.com; connect-src {_connect_sources()}; "
             "script-src 'self' 'unsafe-inline'"
         )
