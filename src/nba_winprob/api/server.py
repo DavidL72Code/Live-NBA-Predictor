@@ -659,6 +659,30 @@ def _fetch_players(game_id: str) -> dict:
         from nba_winprob.providers.espn import fetch_players
 
         result = fetch_players(game_id)
+        players = result.pop("players", [])
+        by_side = {"home": [], "away": []}
+
+        def metric(player: dict) -> float:
+            try:
+                points = float(player.get("points") or 0)
+                rebounds = float(player.get("rebounds") or 0)
+                assists = float(player.get("assists") or 0)
+            except (TypeError, ValueError):
+                return 0
+            return points + rebounds * 0.7 + assists * 0.9 + (6 if player.get("starter") else 0)
+
+        for player in players:
+            side = player.get("team")
+            if side in by_side:
+                by_side[side].append(player)
+        for side in by_side:
+            by_side[side] = sorted(
+                by_side[side],
+                key=lambda player: (bool(player.get("starter")), metric(player)),
+                reverse=True,
+            )[:5]
+        result["home"] = by_side["home"]
+        result["away"] = by_side["away"]
         result["lineup_source"] = "espn_boxscore"
         _write_player_roster_cache(game_id, result)
         return result
