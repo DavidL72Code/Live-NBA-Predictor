@@ -339,29 +339,49 @@ def _fetch_team_schedule(team_code: str, season: str) -> list[dict]:
     import requests
 
     # NBA Stats' scheduleleaguev2 payload is frequently empty/malformed from
-    # cloud hosts. ESPN publishes the same schedule with the provider IDs used
-    # by the rest of the cloud-compatible game flow.
+    # cloud hosts. ESPN's team-schedule endpoint currently ignores its season
+    # query parameter, so build the requested season from monthly scoreboards.
+    season_match = re.fullmatch(r"(\d{4})-(\d{2})", season)
+    if not season_match:
+        raise ValueError(f"invalid NBA season: {season}")
+    start_year = int(season_match.group(1))
+    end_year = start_year + 1
+    month_specs = [(start_year, month) for month in range(9, 13)]
+    month_specs.extend((end_year, month) for month in range(1, 7))
+
     last_error = ""
-    payload = None
-    for hostname in ("site.web.api.espn.com", "site.api.espn.com"):
-        try:
-            response = requests.get(
-                "https://"
-                f"{hostname}/apis/site/v2/sports/basketball/nba/teams/{team_code.lower()}/schedule",
-                headers={"Accept": "application/json", "User-Agent": "SwooshAI/1.0"},
-                timeout=20,
-            )
-            if response.ok:
-                payload = response.json()
-                break
-            last_error = f"{hostname} HTTP {response.status_code}: {response.text[:200]}"
-        except (requests.RequestException, ValueError) as error:
-            last_error = f"{hostname}: {error}"
-    if not isinstance(payload, dict):
+    events_by_id = {}
+    for year, month in month_specs:
+        month_days = (31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)[month - 1]
+        if month == 2 and (year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)):
+            month_days = 29
+        date_range = f"{year:04d}{month:02d}01-{year:04d}{month:02d}{month_days:02d}"
+        month_payload = None
+        for hostname in ("site.web.api.espn.com", "site.api.espn.com"):
+            try:
+                response = requests.get(
+                    f"https://{hostname}/apis/site/v2/sports/basketball/nba/scoreboard",
+                    params={"dates": date_range, "limit": "1000"},
+                    headers={"Accept": "application/json", "User-Agent": "SwooshAI/1.0"},
+                    timeout=20,
+                )
+                if response.ok:
+                    month_payload = response.json()
+                    break
+                last_error = f"{hostname} HTTP {response.status_code}: {response.text[:200]}"
+            except (requests.RequestException, ValueError) as error:
+                last_error = f"{hostname}: {error}"
+        if month_payload is None:
+            continue
+        for event in month_payload.get("events", []):
+            competitors = (event.get("competitions") or [{}])[0].get("competitors") or []
+            if any((item.get("team") or {}).get("abbreviation") == team_code for item in competitors):
+                events_by_id[str(event.get("id"))] = event
+    if not events_by_id and last_error:
         raise RuntimeError(f"team schedule unavailable: {last_error}")
 
     games = []
-    for event in payload.get("events", []):
+    for event in events_by_id.values():
         competition = (event.get("competitions") or [{}])[0]
         competitors = competition.get("competitors") or []
         home = next((item for item in competitors if item.get("homeAway") == "home"), {})
