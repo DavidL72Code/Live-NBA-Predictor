@@ -9,6 +9,7 @@ Load from MLflow with ``from_mlflow(run_id)`` or directly from files with
 from __future__ import annotations
 
 import pickle
+import re
 from pathlib import Path
 
 from nba_winprob.schemas import FeatureVector
@@ -44,7 +45,7 @@ class WinProbServer:
         self._calibrator = calibrator
 
     @classmethod
-    def from_mlflow(cls, run_id: str, tracking_uri: str | None = None) -> "WinProbServer":
+    def from_mlflow(cls, run_id: str, tracking_uri: str | None = None) -> WinProbServer:
         """Load model and calibrator from an MLflow run."""
         import mlflow
         import mlflow.xgboost
@@ -57,7 +58,18 @@ class WinProbServer:
             if uri:
                 mlflow.set_tracking_uri(uri)
 
-        model = mlflow.xgboost.load_model(f"runs:/{run_id}/xgb_model")
+        try:
+            model = mlflow.xgboost.load_model(f"runs:/{run_id}/xgb_model")
+        except Exception as mlflow_error:
+            # MLflow 3 stores the run-to-logged-model mapping in its tracking
+            # database. Deployments that ship the immutable ``mlruns/``
+            # artifacts but not that database can still load the model by
+            # matching the logged model's embedded run_id.
+            local_paths = _find_local_artifacts(run_id)
+            if local_paths is None:
+                raise mlflow_error
+            model_path, calibrator_path = local_paths
+            return cls.from_paths(model_path, calibrator_path)
 
         client = mlflow.tracking.MlflowClient()
         # Support both basic-train and OOF-train calibrator filenames.
@@ -77,7 +89,7 @@ class WinProbServer:
         return cls(model, calibrator)
 
     @classmethod
-    def from_paths(cls, model_path: str | Path, calibrator_path: str | Path) -> "WinProbServer":
+    def from_paths(cls, model_path: str | Path, calibrator_path: str | Path) -> WinProbServer:
         """Load model and calibrator from local file paths."""
         import xgboost as xgb
 
@@ -105,3 +117,36 @@ class WinProbServer:
         X = pd.DataFrame(rows).astype(float)
         raw_probs = self._model.predict_proba(X)[:, 1]
         return list(map(float, self._calibrator.predict(raw_probs)))
+
+
+def _find_local_artifacts(run_id: str) -> tuple[Path, Path] | None:
+    """Find committed MLflow artifacts without requiring the MLflow DB."""
+    roots = [Path.cwd()]
+    source_root = Path(__file__).resolve().parents[3]
+    if source_root not in roots:
+        roots.append(source_root)
+
+    for root in roots:
+        mlruns = root / "mlruns"
+        if not mlruns.is_dir():
+            continue
+        model_path: Path | None = None
+        for descriptor in mlruns.rglob("MLmodel"):
+            try:
+                descriptor_text = descriptor.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            run_id_pattern = rf"^run_id:\s*['\"]?{re.escape(run_id)}['\"]?\s*$"
+            if not re.search(run_id_pattern, descriptor_text, re.MULTILINE):
+                continue
+            candidate = descriptor.parent / "model.ubj"
+            if candidate.is_file():
+                model_path = candidate
+                break
+        if model_path is None:
+            continue
+        for name in ("isotonic_calibrator.pkl", "isotonic_calibrator_oof.pkl"):
+            calibrator = mlruns / "1" / run_id / "artifacts" / "calibration" / name
+            if calibrator.is_file():
+                return model_path, calibrator
+    return None
