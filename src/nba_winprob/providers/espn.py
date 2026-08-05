@@ -12,7 +12,8 @@ import requests
 
 from nba_winprob.schemas import EventType, GameEvent
 
-_SUMMARY_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/summary"
+_SUMMARY_PATH = "/apis/site/v2/sports/basketball/nba/summary"
+_SUMMARY_HOSTS = ("site.web.api.espn.com", "site.api.espn.com")
 _CLOCK_RE = re.compile(r"^(\d+):(\d+(?:\.\d+)?)$")
 
 
@@ -64,17 +65,26 @@ def _shot_value(text: str, event_type: EventType) -> int | None:
 
 
 def _summary(event_id: str) -> dict:
-    response = requests.get(
-        _SUMMARY_URL,
-        params={"event": event_id},
-        headers={"Accept": "application/json", "User-Agent": "SwooshAI/1.0"},
-        timeout=20,
-    )
-    response.raise_for_status()
-    payload = response.json()
-    if not isinstance(payload.get("plays"), list):
-        raise RuntimeError("ESPN summary did not contain a plays list")
-    return payload
+    last_error = ""
+    for hostname in _SUMMARY_HOSTS:
+        try:
+            response = requests.get(
+                f"https://{hostname}{_SUMMARY_PATH}",
+                params={"event": event_id},
+                headers={"Accept": "application/json", "User-Agent": "SwooshAI/1.0"},
+                timeout=20,
+            )
+            if not response.ok:
+                last_error = f"{hostname} HTTP {response.status_code}: {response.text[:240]}"
+                continue
+            payload = response.json()
+            if not isinstance(payload.get("plays"), list):
+                last_error = f"{hostname} response did not contain a plays list"
+                continue
+            return payload
+        except (requests.RequestException, ValueError) as error:
+            last_error = f"{hostname}: {error}"
+    raise RuntimeError(f"ESPN summary unavailable for event {event_id}: {last_error}")
 
 
 def normalize_summary(event_id: str, payload: dict | None = None) -> list[GameEvent]:
