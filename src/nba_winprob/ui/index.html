@@ -674,7 +674,7 @@ document.getElementById('game-type-filter').addEventListener('change', e => {
   renderGameList();
 });
 document.getElementById('team-catalog-button').addEventListener('click', () => {
-  if (state.teamFilter !== 'all') loadTeamCatalog(state.teamFilter);
+  if (state.teamFilter !== 'all') loadTeamCatalog(state.teamFilter, true);
 });
 
 function showHome() {
@@ -1053,7 +1053,7 @@ function updateTeamCatalogBar() {
   button.disabled = false;
 }
 
-async function loadTeamCatalog(teamCode) {
+async function loadTeamCatalog(teamCode, forceRefresh = false) {
   const team = TEAM_DIRECTORY.find(item => item.code === teamCode);
   const button = document.getElementById('team-catalog-button');
   const note = document.getElementById('team-catalog-note');
@@ -1064,7 +1064,13 @@ async function loadTeamCatalog(teamCode) {
   const homeStatus = document.getElementById('home-fetch-status');
   if (homeStatus) { homeStatus.className = 'home-fetch-status loading'; homeStatus.textContent = `Loading ${team.name} schedule…`; }
   try {
-    const data = await cachedJSON(`team-schedule:${teamCode}`, `${API_BASE}/api/teams/${encodeURIComponent(teamCode)}/games`, 900000);
+    const url = `${API_BASE}/api/teams/${encodeURIComponent(teamCode)}/games`;
+    const data = forceRefresh
+      ? await fetch(url).then(async response => {
+          if (!response.ok) throw new Error(await response.text());
+          return response.json();
+        })
+      : await cachedJSON(`team-schedule:${teamCode}`, url, 900000);
     state.catalogTeam = teamCode;
     state.catalogGames = data.games || [];
     renderGameList();
