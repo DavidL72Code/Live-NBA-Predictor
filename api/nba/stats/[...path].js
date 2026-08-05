@@ -30,25 +30,38 @@ module.exports = async function handler(req, res) {
   try {
     if (endpoint === 'scoreboardv3') {
       const gameDate = requestUrl.searchParams.get('GameDate');
-      const espnUrl = new URL(
-        'https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard',
-      );
-      if (gameDate) espnUrl.searchParams.set('dates', gameDate.replaceAll('-', ''));
-      const espnResponse = await fetch(espnUrl, {
-        signal: AbortSignal.timeout(10000),
-        headers: {
-          Accept: 'application/json',
-          'User-Agent': 'SwooshAI/1.0',
-        },
-      });
-      if (!espnResponse.ok) {
-        const body = await espnResponse.text();
-        return res.status(502).json({
-          detail: `ESPN scoreboard returned HTTP ${espnResponse.status}: ${body.slice(0, 240)}`,
-        });
+      let espnPayload = null;
+      let espnError = '';
+      // ESPN serves the same public API from two hostnames. Cloud egress
+      // addresses can be denied by one edge while the other remains usable.
+      for (const hostname of ['site.web.api.espn.com', 'site.api.espn.com']) {
+        const espnUrl = new URL(
+          `https://${hostname}/apis/site/v2/sports/basketball/nba/scoreboard`,
+        );
+        if (gameDate) espnUrl.searchParams.set('dates', gameDate.replaceAll('-', ''));
+        try {
+          const espnResponse = await fetch(espnUrl, {
+            signal: AbortSignal.timeout(10000),
+            headers: {
+              Accept: 'application/json',
+              'User-Agent': 'SwooshAI/1.0',
+            },
+          });
+          if (espnResponse.ok) {
+            espnPayload = await espnResponse.json();
+            break;
+          }
+          const body = await espnResponse.text();
+          espnError = `${hostname} HTTP ${espnResponse.status}: ${body.slice(0, 240)}`;
+        } catch (error) {
+          espnError = `${hostname}: ${error.message}`;
+        }
       }
-      const espnPayload = await espnResponse.json();
-      const games = (espnPayload.events || []).map((event) => {
+      if (!espnPayload) {
+        // Continue to the NBA CDN/stats fallbacks below instead of returning
+        // immediately; ESPN may be unavailable from a particular cloud edge.
+      } else {
+        const games = (espnPayload.events || []).map((event) => {
         const competition = event.competitions?.[0] || {};
         const competitors = competition.competitors || [];
         const home = competitors.find((team) => team.homeAway === 'home') || {};
@@ -81,10 +94,11 @@ module.exports = async function handler(req, res) {
             score: away.score || '0',
           },
         };
-      });
-      res.setHeader('Content-Type', 'application/json');
-      res.setHeader('Cache-Control', 'public, s-maxage=30, stale-while-revalidate=120');
-      return res.status(200).send(JSON.stringify({ scoreboard: { games } }));
+        });
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Cache-Control', 'public, s-maxage=30, stale-while-revalidate=120');
+        return res.status(200).send(JSON.stringify({ scoreboard: { games } }));
+      }
     }
 
     // The live scoreboard is also published as a small CDN artifact. Prefer
