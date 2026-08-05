@@ -335,61 +335,84 @@ async def get_team_games(team_code: str, season: str | None = Query(default=None
 
 @lru_cache(maxsize=8)
 def _fetch_team_schedule(team_code: str, season: str) -> list[dict]:
-    _configure_stats_proxy()
-    from nba_api.stats.endpoints import scheduleleaguev2
+    import requests
 
-    payload = scheduleleaguev2.ScheduleLeagueV2(season=season, timeout=45).get_dict()
-    result_sets = payload.get("resultSets") or payload.get("resultSet") or []
-    season_games = next(
-        (item for item in result_sets if item.get("name") == "SeasonGames"),
-        result_sets[0] if result_sets else {},
-    )
-    headers = season_games.get("headers", [])
-    rows = season_games.get("rowSet", [])
-    idx = {header: position for position, header in enumerate(headers)}
-
-    def value(row, key, fallback=None):
-        position = idx.get(key)
-        return row[position] if position is not None and position < len(row) else fallback
+    # NBA Stats' scheduleleaguev2 payload is frequently empty/malformed from
+    # cloud hosts. ESPN publishes the same schedule with the provider IDs used
+    # by the rest of the cloud-compatible game flow.
+    last_error = ""
+    payload = None
+    for hostname in ("site.web.api.espn.com", "site.api.espn.com"):
+        try:
+            response = requests.get(
+                "https://"
+                f"{hostname}/apis/site/v2/sports/basketball/nba/teams/{team_code.lower()}/schedule",
+                headers={"Accept": "application/json", "User-Agent": "SwooshAI/1.0"},
+                timeout=20,
+            )
+            if response.ok:
+                payload = response.json()
+                break
+            last_error = f"{hostname} HTTP {response.status_code}: {response.text[:200]}"
+        except (requests.RequestException, ValueError) as error:
+            last_error = f"{hostname}: {error}"
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"team schedule unavailable: {last_error}")
 
     games = []
-    for row in rows:
-        home = str(value(row, "homeTeam_teamTricode", "") or "")
-        away = str(value(row, "awayTeam_teamTricode", "") or "")
-        if team_code not in {home, away}:
+    for event in payload.get("events", []):
+        competition = (event.get("competitions") or [{}])[0]
+        competitors = competition.get("competitors") or []
+        home = next((item for item in competitors if item.get("homeAway") == "home"), {})
+        away = next((item for item in competitors if item.get("homeAway") == "away"), {})
+        home_team = home.get("team") or {}
+        away_team = away.get("team") or {}
+        home_code = str(home_team.get("abbreviation") or "")
+        away_code = str(away_team.get("abbreviation") or "")
+        if team_code not in {home_code, away_code}:
             continue
-        game_id = str(value(row, "gameId", "") or "")
-        label = " ".join(str(value(row, key, "") or "") for key in (
-            "gameLabel", "gameSubLabel", "gameSubtype", "seriesText"
-        )).lower()
+
+        status = competition.get("status") or {}
+        status_type = status.get("type") or {}
+        state = status_type.get("state") or "pre"
+        if state == "in":
+            status_label = "Live"
+        elif state == "post":
+            status_label = "Final"
+        else:
+            status_label = "Scheduled"
+        season_type = event.get("seasonType") or {}
+        type_id = int(season_type.get("type") or 2)
+        label = str(event.get("name") or "").lower()
         if "cup" in label or "in-season" in label:
             game_type, game_type_label = "nba_cup", "NBA Cup"
-        elif game_id.startswith("001"):
+        elif type_id == 1:
             game_type, game_type_label = "preseason", "Preseason"
-        elif game_id.startswith("004") or value(row, "seriesGameNumber"):
+        elif type_id == 3:
             game_type, game_type_label = "playoffs", "Playoffs"
         else:
             game_type, game_type_label = "regular", "Regular season"
-        status_id = int(value(row, "gameStatus", 1) or 1)
-        status = {1: "Scheduled", 2: "Live", 3: "Final"}.get(status_id, "Scheduled")
-        home_score = value(row, "homeTeam_score", 0)
-        away_score = value(row, "awayTeam_score", 0)
+
         games.append({
-            "game_id": game_id,
-            "status": status,
-            "status_text": str(value(row, "gameStatusText", "") or ""),
+            "game_id": f"espn:{event.get('id')}",
+            "status": status_label,
+            "status_text": str(status_type.get("detail") or status_type.get("shortDetail") or ""),
             "period": 0,
             "clock": "",
-            "home_team": home,
-            "home_team_name": str(value(row, "homeTeam_teamName", "") or ""),
-            "home_score": int(home_score or 0),
-            "away_team": away,
-            "away_team_name": str(value(row, "awayTeam_teamName", "") or ""),
-            "away_score": int(away_score or 0),
+            "home_team": home_code,
+            "home_team_name": str(
+                home_team.get("shortDisplayName") or home_team.get("displayName") or ""
+            ),
+            "home_score": int(home.get("score") or 0),
+            "away_team": away_code,
+            "away_team_name": str(
+                away_team.get("shortDisplayName") or away_team.get("displayName") or ""
+            ),
+            "away_score": int(away.get("score") or 0),
             "game_type": game_type,
             "game_type_label": game_type_label,
-            "game_date": str(value(row, "gameDateEst", "") or value(row, "gameDate", "")),
-            "game_time_utc": str(value(row, "gameDateTimeUTC", "") or ""),
+            "game_date": str(event.get("date") or ""),
+            "game_time_utc": str(event.get("date") or ""),
         })
     return sorted(games, key=lambda game: game["game_date"])
 
