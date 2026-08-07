@@ -29,7 +29,7 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from nba_winprob.config import get_settings
 
@@ -56,6 +56,35 @@ def _connect_sources() -> str:
     return " ".join(["'self'", *allowed])
 
 
+_GAME_ID_RE = re.compile(r"(?:espn:\d{6,12}|\d{10})\Z")
+_SEASON_RE = re.compile(r"\A(\d{4})-(\d{2})\Z")
+
+
+def _validate_game_id(game_id: str) -> str:
+    if not _GAME_ID_RE.fullmatch(game_id):
+        raise HTTPException(status_code=400, detail="Invalid game ID")
+    return game_id
+
+
+def _validate_season(season: str) -> str:
+    match = _SEASON_RE.fullmatch(season)
+    if not match or int(match.group(2)) != (int(match.group(1)) + 1) % 100:
+        raise HTTPException(status_code=400, detail="Invalid NBA season")
+    if not 1990 <= int(match.group(1)) <= date.today().year + 1:
+        raise HTTPException(status_code=400, detail="NBA season is outside the supported range")
+    return season
+
+
+def _validate_date_param(value: str) -> str:
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="date must use YYYY-MM-DD format") from exc
+    if parsed.year < 1990 or parsed.year > date.today().year + 1:
+        raise HTTPException(status_code=400, detail="date is outside the supported range")
+    return value
+
+
 def _configure_stats_proxy() -> None:
     """Route nba_api through an optional same-schema cloud proxy."""
     proxy = (get_settings().stats_proxy_url or "").strip().rstrip("/")
@@ -69,19 +98,30 @@ def _configure_stats_proxy() -> None:
         NBAStatsHTTP.headers = {**NBAStatsHTTP.headers, "X-Swoosh-Proxy-Token": token}
 
 
-app = FastAPI(title="NBA Win Probability Analyst", version="1.0")
+app = FastAPI(
+    title="NBA Win Probability Analyst",
+    version="1.0",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins(),
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Accept", "Content-Type", "X-Request-ID"],
 )
 
 
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
     """Attach lightweight browser protections and a traceable request id."""
-    request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:16]
+    supplied_request_id = request.headers.get("X-Request-ID", "")
+    request_id = (
+        supplied_request_id
+        if re.fullmatch(r"[A-Za-z0-9._:-]{1,64}", supplied_request_id)
+        else uuid.uuid4().hex[:16]
+    )
     response = await call_next(request)
     response.headers["X-Request-ID"] = request_id
     response.headers["X-Content-Type-Options"] = "nosniff"
@@ -90,7 +130,8 @@ async def security_headers(request: Request, call_next):
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     if request.url.path in {"/", "/rd.html"}:
         response.headers["Content-Security-Policy"] = (
-            "default-src 'self' https://cdn.nba.com https://fonts.googleapis.com https://fonts.gstatic.com; "
+            "default-src 'self' https://cdn.nba.com https://fonts.googleapis.com "
+            "https://fonts.gstatic.com; "
             "img-src 'self' data: https://cdn.nba.com https://a.espncdn.com; "
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
             f"font-src 'self' https://fonts.gstatic.com; connect-src {_connect_sources()}; "
@@ -131,6 +172,8 @@ class _RateLimiter:
 # while preventing a script or exposed dev server from burning the API quota.
 _AI_PER_CLIENT_LIMITER = _RateLimiter(limit=6, window_seconds=60)
 _AI_GLOBAL_LIMITER = _RateLimiter(limit=30, window_seconds=60)
+_PUBLIC_PER_CLIENT_LIMITER = _RateLimiter(limit=120, window_seconds=60)
+_PUBLIC_GLOBAL_LIMITER = _RateLimiter(limit=600, window_seconds=60)
 
 _ANALYST_CACHE_TTL = 45.0
 _ANALYST_CACHE: dict[str, tuple[float, dict]] = {}
@@ -194,6 +237,24 @@ def _check_ai_rate_limit(request: Request) -> None:
         raise HTTPException(
             status_code=429,
             detail="AI request capacity is temporarily exhausted. Try again shortly.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
+
+def _check_public_rate_limit(request: Request) -> None:
+    client_host = request.client.host if request.client else "unknown"
+    allowed, retry_after = _PUBLIC_PER_CLIENT_LIMITER.check(client_host)
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail="Request limit reached for this client. Try again shortly.",
+            headers={"Retry-After": str(retry_after)},
+        )
+    allowed, retry_after = _PUBLIC_GLOBAL_LIMITER.check("all-clients")
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail="Request capacity is temporarily exhausted. Try again shortly.",
             headers={"Retry-After": str(retry_after)},
         )
 
@@ -292,10 +353,11 @@ async def frontend_config():
 # ── Scoreboard ──────────────────────────────────────────────────────────────
 
 
-@app.get("/api/scoreboard")
+@app.get("/api/scoreboard", dependencies=[Depends(_check_public_rate_limit)])
 async def get_scoreboard(date_param: str = Query(default=None, alias="date")):
     """Return all games for a date (YYYY-MM-DD) or today if omitted."""
     target_date = date_param or date.today().isoformat()
+    _validate_date_param(target_date)
     try:
         games = await asyncio.to_thread(_fetch_scoreboard, target_date)
     except Exception as exc:
@@ -314,7 +376,7 @@ def _catalog_season() -> str:
     return f"{start_year}-{str(start_year + 1)[-2:]}"
 
 
-@app.get("/api/teams/{team_code}/games")
+@app.get("/api/teams/{team_code}/games", dependencies=[Depends(_check_public_rate_limit)])
 async def get_team_games(team_code: str, season: str | None = Query(default=None)):
     """Return a team's full latest-season schedule for catalog browsing."""
     code = team_code.strip().upper()
@@ -326,6 +388,7 @@ async def get_team_games(team_code: str, season: str | None = Query(default=None
     if code not in valid_codes:
         raise HTTPException(status_code=400, detail="Unknown NBA team code")
     target_season = season or _catalog_season()
+    _validate_season(target_season)
     try:
         games = await asyncio.to_thread(_fetch_team_schedule, code, target_season)
     except Exception as exc:
@@ -375,7 +438,10 @@ def _fetch_team_schedule(team_code: str, season: str) -> list[dict]:
             continue
         for event in month_payload.get("events", []):
             competitors = (event.get("competitions") or [{}])[0].get("competitors") or []
-            if any((item.get("team") or {}).get("abbreviation") == team_code for item in competitors):
+            if any(
+                (item.get("team") or {}).get("abbreviation") == team_code
+                for item in competitors
+            ):
                 events_by_id[str(event.get("id"))] = event
     if not events_by_id and last_error:
         raise RuntimeError(f"team schedule unavailable: {last_error}")
@@ -533,9 +599,10 @@ def _fetch_scoreboard(target_date: str) -> list[dict]:
 # ── Game history ─────────────────────────────────────────────────────────────
 
 
-@app.get("/api/games/{game_id}/history")
+@app.get("/api/games/{game_id}/history", dependencies=[Depends(_check_public_rate_limit)])
 async def game_history(game_id: str, refresh: bool = Query(default=False)):
     """Full play-by-play for a game with model win probabilities at each event."""
+    _validate_game_id(game_id)
     try:
         # Completed games are immutable, so reuse the in-process result.
         # Live games pass refresh=1 because their event stream must stay fresh.
@@ -549,9 +616,10 @@ async def game_history(game_id: str, refresh: bool = Query(default=False)):
     return result
 
 
-@app.get("/api/games/{game_id}/players")
+@app.get("/api/games/{game_id}/players", dependencies=[Depends(_check_public_rate_limit)])
 async def game_players(game_id: str, refresh: bool = Query(default=False)):
     """Player cards for the roster-style pre-game/live intro."""
+    _validate_game_id(game_id)
     try:
         if refresh:
             result = await asyncio.to_thread(_fetch_players, game_id)
@@ -837,9 +905,10 @@ def _normalized_events(game_id: str) -> tuple:
 # ── Live snapshot ─────────────────────────────────────────────────────────────
 
 
-@app.get("/api/games/{game_id}/live")
+@app.get("/api/games/{game_id}/live", dependencies=[Depends(_check_public_rate_limit)])
 async def game_live(game_id: str):
     """Current feature vector + model probability from Redis."""
+    _validate_game_id(game_id)
     try:
         from nba_winprob.store.online import OnlineStore
 
@@ -869,9 +938,10 @@ async def game_live(game_id: str):
 # ── SSE live stream ───────────────────────────────────────────────────────────
 
 
-@app.get("/api/games/{game_id}/stream")
+@app.get("/api/games/{game_id}/stream", dependencies=[Depends(_check_public_rate_limit)])
 async def stream_game(game_id: str):
     """Server-sent events: push probability updates as Redis changes."""
+    _validate_game_id(game_id)
 
     async def generator():
         last_event_num = -1
@@ -919,6 +989,7 @@ async def stream_game(game_id: str):
 @app.post("/api/games/{game_id}/analyze", dependencies=[Depends(_check_ai_rate_limit)])
 async def analyze_game(game_id: str):
     """Run the LLM analyst on the current game state."""
+    _validate_game_id(game_id)
     settings = get_settings()
     if not settings.gemini_api_key:
         raise HTTPException(
@@ -968,7 +1039,7 @@ async def analyze_game(game_id: str):
 
 
 class PredictAtRequest(BaseModel):
-    event_num: int
+    event_num: int = Field(ge=1, le=10000)
     home_team: str | None = None
     away_team: str | None = None
     game_time_utc: str | None = None
@@ -1011,6 +1082,7 @@ def _replay_to_event(
 @app.post("/api/games/{game_id}/predict-at", dependencies=[Depends(_check_ai_rate_limit)])
 async def predict_at_event(game_id: str, req: PredictAtRequest, refresh: bool = Query(default=False)):
     """Replay history to a specific event, run model + LLM analyst."""
+    _validate_game_id(game_id)
     settings = get_settings()
     if not settings.gemini_api_key:
         raise HTTPException(
