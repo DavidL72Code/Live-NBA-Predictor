@@ -5,6 +5,7 @@
     nba-winprob produce        # live: poll NBA → publish events to Kafka
     nba-winprob process        # live: consume events → compute features → write Redis
     nba-winprob train          # train XGBoost model, log to MLflow
+    nba-winprob benchmark      # compare out-of-time model candidates
 """
 
 from __future__ import annotations
@@ -263,6 +264,23 @@ def cmd_train(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_benchmark(args: argparse.Namespace) -> int:
+    """Run future-season model, calibration, ensemble, and margin benchmarks."""
+    import pandas as pd
+
+    from nba_winprob.training.advanced import run_advanced_benchmark
+
+    frame = pd.read_parquet(args.parquet)
+    result = run_advanced_benchmark(frame, min_train_seasons=args.min_train_seasons)
+    output = json.dumps(result, indent=2, default=lambda value: value.tolist())
+    if args.output:
+        Path(args.output).write_text(output + "\n", encoding="utf-8")
+        print(f"benchmark results written to {args.output}")
+    else:
+        print(output)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -357,6 +375,20 @@ def main(argv: list[str] | None = None) -> int:
     train_cmd.add_argument("--run-name", default=None)
     train_cmd.add_argument("--test-size", type=float, default=0.2)
     train_cmd.set_defaults(func=cmd_train)
+
+    benchmark_cmd = subparsers.add_parser(
+        "benchmark", help="compare future-season model and probability candidates"
+    )
+    benchmark_cmd.add_argument(
+        "--parquet", default="data/features/features_enhanced.parquet",
+        help="feature table containing game_id and home_win",
+    )
+    benchmark_cmd.add_argument(
+        "--min-train-seasons", type=int, default=2,
+        help="number of earliest seasons required before the first validation season",
+    )
+    benchmark_cmd.add_argument("--output", default=None, help="optional JSON output path")
+    benchmark_cmd.set_defaults(func=cmd_benchmark)
 
     args = parser.parse_args(argv)
     return args.func(args)

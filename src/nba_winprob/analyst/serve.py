@@ -25,6 +25,7 @@ class _TrustedArtifactUnpickler(pickle.Unpickler):
         ("numpy", "ndarray"),
         ("numpy._core.multiarray", "scalar"),
         ("numpy._core.multiarray", "_reconstruct"),
+        ("nba_winprob.training.advanced", "BetaCalibrator"),
     }
 
     def find_class(self, module: str, name: str):  # noqa: ANN001

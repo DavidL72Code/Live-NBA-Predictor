@@ -17,6 +17,7 @@ dependencies = [
     "psycopg2-binary>=2.9",
     "xgboost>=2.0",
     "scikit-learn>=1.4",
+    "scipy>=1.10",
     "mlflow>=2.13",
     "pandas>=2.0",
     "pyarrow>=15.0",
