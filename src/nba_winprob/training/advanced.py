@@ -28,26 +28,30 @@ DEFAULT_XGB_GRID = (
 )
 
 
-def _sample_events_per_game(df: pd.DataFrame, max_events_per_game: int | None) -> pd.DataFrame:
+def _sample_events_per_game(
+    df: pd.DataFrame,
+    max_events_per_game: int | None,
+    include_terminal: bool = False,
+) -> pd.DataFrame:
     """Keep evenly spaced event states while retaining every game."""
     if max_events_per_game is None:
         return df
     if max_events_per_game < 1:
         raise ValueError("max_events_per_game must be positive or None")
     ordered = df.sort_values(["game_id", "event_num"])
+
+    def select_events(game: pd.DataFrame) -> pd.DataFrame:
+        eligible = game
+        count = min(max_events_per_game, len(eligible))
+        return eligible.iloc[np.linspace(0, len(eligible) - 1, count, dtype=int)]
+
+    if not include_terminal:
+        terminal_event = ordered.groupby("game_id")["event_num"].transform("max")
+        ordered = ordered[ordered["event_num"] < terminal_event]
+
     return (
         ordered.groupby("game_id", group_keys=False, sort=False)
-        .apply(
-            lambda game: game.iloc[
-                np.linspace(
-                    0,
-                    len(game) - 1,
-                    min(max_events_per_game, len(game)),
-                    dtype=int,
-                )
-            ],
-            include_groups=True,
-        )
+        .apply(select_events, include_groups=True)
         .reset_index(drop=True)
     )
 
@@ -61,6 +65,41 @@ def _metrics(labels, probabilities) -> dict[str, float]:
         "brier": float(brier_score_loss(y, p)),
         "log_loss": float(log_loss(y, p, labels=[0, 1])),
         "roc_auc": float(roc_auc_score(y, p)) if len(np.unique(y)) == 2 else float("nan"),
+    }
+
+
+def _game_bootstrap_intervals(
+    game_ids,
+    labels,
+    predictions: dict[str, np.ndarray],
+    samples: int = 300,
+    seed: int = 42,
+) -> dict[str, dict[str, dict[str, float]]]:
+    """Bootstrap complete games, preserving within-game event dependence."""
+    ids = np.asarray(game_ids)
+    y = np.asarray(labels, dtype=int)
+    unique_games = np.unique(ids)
+    rows = {name: {metric: [] for metric in ("brier", "log_loss", "roc_auc")}
+            for name in predictions}
+    rng = np.random.default_rng(seed)
+    game_rows = {game: np.flatnonzero(ids == game) for game in unique_games}
+    for _ in range(samples):
+        sampled_games = rng.choice(unique_games, size=len(unique_games), replace=True)
+        indices = np.concatenate([game_rows[game] for game in sampled_games])
+        for name, probabilities in predictions.items():
+            metrics = _metrics(y[indices], probabilities[indices])
+            for metric, value in metrics.items():
+                if np.isfinite(value):
+                    rows[name][metric].append(value)
+    return {
+        name: {
+            metric: {
+                "lower": float(np.percentile(values, 2.5)),
+                "upper": float(np.percentile(values, 97.5)),
+            }
+            for metric, values in metric_values.items()
+        }
+        for name, metric_values in rows.items()
     }
 
 
@@ -341,6 +380,7 @@ def oof_ensemble_benchmark(
     feature_cols = feature_cols or FEATURE_COLS
     outer_labels = []
     outer_blends = []
+    outer_game_ids = []
     season_rows = []
     model_names = ["xgboost", "logistic"]
     if include_hist:
@@ -454,6 +494,7 @@ def oof_ensemble_benchmark(
         )
         labels = outer_validation[TARGET_COL].astype(int).to_numpy()
         outer_labels.append(labels)
+        outer_game_ids.append(outer_validation["game_id"].to_numpy())
         outer_blends.append(
             np.column_stack((
                 outer_matrix,
@@ -483,6 +524,20 @@ def oof_ensemble_benchmark(
 
     y = np.concatenate(outer_labels)
     predictions = np.vstack(outer_blends)
+    game_ids = np.concatenate(outer_game_ids)
+    bootstrap = _game_bootstrap_intervals(
+        game_ids,
+        y,
+        {
+            "xgboost": predictions[:, 0],
+            "logistic": predictions[:, 1],
+            "blend": predictions[:, 2],
+            "blend_beta": predictions[:, 3],
+            "blend_temperature": predictions[:, 4],
+            "logistic_beta": predictions[:, 5],
+            "logistic_temperature": predictions[:, 6],
+        },
+    )
     return {
         "base_metrics": {
             "xgboost": _metrics(y, predictions[:, 0]),
@@ -494,6 +549,7 @@ def oof_ensemble_benchmark(
         "logistic_beta_metrics": _metrics(y, predictions[:, 5]),
         "logistic_temperature_metrics": _metrics(y, predictions[:, 6]),
         "oof_rows": int(len(y)),
+        "game_bootstrap_95": bootstrap,
         "outer_seasons": season_rows,
         "model_names": model_names,
     }
@@ -535,6 +591,278 @@ def feature_group_ablation_benchmark(
             feature_cols=selected,
         )
     return results
+
+
+def nested_logistic_benchmark(
+    df: pd.DataFrame,
+    min_train_seasons: int = 2,
+    c_grid: tuple[float, ...] = (0.01, 0.05, 0.1, 0.5, 1.0, 10.0, 100.0),
+    feature_cols: list[str] | None = None,
+) -> dict:
+    """Select logistic regularization only inside historical inner folds."""
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.pipeline import make_pipeline
+    from sklearn.preprocessing import StandardScaler
+
+    _validate(df)
+    feature_cols = feature_cols or FEATURE_COLS
+    outer_labels = []
+    outer_predictions = []
+    season_rows = []
+    for train_idx, validation_idx, _, validation_season in walk_forward_folds(
+        df, min_train_seasons=min_train_seasons
+    ):
+        outer_train = df.iloc[train_idx]
+        outer_validation = df.iloc[validation_idx]
+        scores = []
+        for c_value in c_grid:
+            inner_scores = []
+            for inner_train_idx, inner_validation_idx, _, _ in walk_forward_folds(
+                outer_train, min_train_seasons=1
+            ):
+                inner_train = outer_train.iloc[inner_train_idx]
+                inner_validation = outer_train.iloc[inner_validation_idx]
+                model = make_pipeline(
+                    StandardScaler(),
+                    LogisticRegression(max_iter=1000, C=c_value),
+                )
+                model.fit(
+                    inner_train[feature_cols].astype(float),
+                    inner_train[TARGET_COL].astype(int),
+                )
+                probabilities = model.predict_proba(
+                    inner_validation[feature_cols].astype(float)
+                )[:, 1]
+                inner_scores.append(_metrics(inner_validation[TARGET_COL], probabilities))
+            scores.append({
+                "C": c_value,
+                "log_loss": float(np.mean([score["log_loss"] for score in inner_scores])),
+                "brier": float(np.mean([score["brier"] for score in inner_scores])),
+            })
+        selected = min(scores, key=lambda score: (score["log_loss"], score["brier"]))
+        final_model = make_pipeline(
+            StandardScaler(),
+            LogisticRegression(max_iter=1000, C=selected["C"]),
+        )
+        final_model.fit(
+            outer_train[feature_cols].astype(float),
+            outer_train[TARGET_COL].astype(int),
+        )
+        labels = outer_validation[TARGET_COL].astype(int).to_numpy()
+        probabilities = final_model.predict_proba(
+            outer_validation[feature_cols].astype(float)
+        )[:, 1]
+        outer_labels.append(labels)
+        outer_predictions.append(probabilities)
+        season_rows.append({
+            "validation_season": validation_season,
+            "selected_C": selected["C"],
+            "inner_scores": scores,
+            "outer_metrics": _metrics(labels, probabilities),
+        })
+    labels = np.concatenate(outer_labels)
+    probabilities = np.concatenate(outer_predictions)
+    return {
+        "metrics": _metrics(labels, probabilities),
+        "outer_seasons": season_rows,
+        "oof_rows": int(len(labels)),
+        "feature_cols": feature_cols,
+    }
+
+
+def nested_logistic_feature_selection_benchmark(
+    df: pd.DataFrame,
+    feature_sets: dict[str, list[str]],
+    min_train_seasons: int = 2,
+    c_grid: tuple[float, ...] = (0.5, 1.0, 3.0, 10.0, 30.0, 100.0),
+) -> dict:
+    """Select feature set and regularization only in inner historical folds."""
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.pipeline import make_pipeline
+    from sklearn.preprocessing import StandardScaler
+
+    _validate(df)
+    outer_labels = []
+    outer_predictions = []
+    outer_game_ids = []
+    season_rows = []
+    for train_idx, validation_idx, _, validation_season in walk_forward_folds(
+        df, min_train_seasons=min_train_seasons
+    ):
+        outer_train = df.iloc[train_idx]
+        outer_validation = df.iloc[validation_idx]
+        candidates = []
+        for set_name, feature_cols in feature_sets.items():
+            for c_value in c_grid:
+                scores = []
+                for inner_train_idx, inner_validation_idx, _, _ in walk_forward_folds(
+                    outer_train, min_train_seasons=1
+                ):
+                    inner_train = outer_train.iloc[inner_train_idx]
+                    inner_validation = outer_train.iloc[inner_validation_idx]
+                    model = make_pipeline(
+                        StandardScaler(),
+                        LogisticRegression(max_iter=1000, C=c_value),
+                    )
+                    model.fit(
+                        inner_train[feature_cols].astype(float),
+                        inner_train[TARGET_COL].astype(int),
+                    )
+                    probabilities = model.predict_proba(
+                        inner_validation[feature_cols].astype(float)
+                    )[:, 1]
+                    scores.append(_metrics(inner_validation[TARGET_COL], probabilities))
+                candidates.append({
+                    "feature_set": set_name,
+                    "C": c_value,
+                    "log_loss": float(np.mean([score["log_loss"] for score in scores])),
+                    "brier": float(np.mean([score["brier"] for score in scores])),
+                })
+        selected = min(candidates, key=lambda score: (score["log_loss"], score["brier"]))
+        selected_features = feature_sets[selected["feature_set"]]
+        final_model = make_pipeline(
+            StandardScaler(),
+            LogisticRegression(max_iter=1000, C=selected["C"]),
+        )
+        final_model.fit(
+            outer_train[selected_features].astype(float),
+            outer_train[TARGET_COL].astype(int),
+        )
+        labels = outer_validation[TARGET_COL].astype(int).to_numpy()
+        probabilities = final_model.predict_proba(
+            outer_validation[selected_features].astype(float)
+        )[:, 1]
+        outer_labels.append(labels)
+        outer_predictions.append(probabilities)
+        outer_game_ids.append(outer_validation["game_id"].to_numpy())
+        season_rows.append({
+            "validation_season": validation_season,
+            "selected": selected,
+            "outer_metrics": _metrics(labels, probabilities),
+        })
+    labels = np.concatenate(outer_labels)
+    probabilities = np.concatenate(outer_predictions)
+    bootstrap = _game_bootstrap_intervals(
+        np.concatenate(outer_game_ids),
+        labels,
+        {"logistic": probabilities},
+    )
+    return {
+        "metrics": _metrics(labels, probabilities),
+        "outer_seasons": season_rows,
+        "oof_rows": int(len(labels)),
+        "game_bootstrap_95": bootstrap,
+    }
+
+
+def nested_spline_logistic_benchmark(
+    df: pd.DataFrame,
+    min_train_seasons: int = 2,
+    c_grid: tuple[float, ...] = (0.1, 1.0, 10.0),
+    knot_grid: tuple[int, ...] = (3, 4, 5),
+    feature_cols: list[str] | None = None,
+) -> dict:
+    """Evaluate a low-complexity spline logistic model with nested tuning."""
+    from sklearn.compose import ColumnTransformer
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.pipeline import make_pipeline
+    from sklearn.preprocessing import SplineTransformer, StandardScaler
+
+    _validate(df)
+    feature_cols = feature_cols or FEATURE_COLS
+    spline_cols = [
+        column for column in (
+            "seconds_remaining", "score_diff", "score_diff_norm", "run_diff"
+        ) if column in feature_cols
+    ]
+    linear_cols = [column for column in feature_cols if column not in spline_cols]
+
+    def build_model(c_value: float, knots: int):
+        transformer = ColumnTransformer([
+            (
+                "spline",
+                make_pipeline(
+                    SplineTransformer(
+                        n_knots=knots,
+                        degree=2,
+                        include_bias=False,
+                    ),
+                    StandardScaler(),
+                ),
+                spline_cols,
+            ),
+            ("linear", StandardScaler(), linear_cols),
+        ])
+        return make_pipeline(
+            transformer,
+            LogisticRegression(max_iter=1000, C=c_value),
+        )
+
+    _validate(df)
+    outer_labels = []
+    outer_predictions = []
+    season_rows = []
+    for train_idx, validation_idx, _, validation_season in walk_forward_folds(
+        df, min_train_seasons=min_train_seasons
+    ):
+        outer_train = df.iloc[train_idx]
+        outer_validation = df.iloc[validation_idx]
+        scores = []
+        for knots in knot_grid:
+            for c_value in c_grid:
+                inner_scores = []
+                for inner_train_idx, inner_validation_idx, _, _ in walk_forward_folds(
+                    outer_train, min_train_seasons=1
+                ):
+                    inner_train = outer_train.iloc[inner_train_idx]
+                    inner_validation = outer_train.iloc[inner_validation_idx]
+                    model = build_model(c_value, knots)
+                    model.fit(
+                        inner_train[feature_cols].astype(float),
+                        inner_train[TARGET_COL].astype(int),
+                    )
+                    probabilities = model.predict_proba(
+                        inner_validation[feature_cols].astype(float)
+                    )[:, 1]
+                    inner_scores.append(
+                        _metrics(inner_validation[TARGET_COL], probabilities)
+                    )
+                scores.append({
+                    "C": c_value,
+                    "knots": knots,
+                    "log_loss": float(
+                        np.mean([score["log_loss"] for score in inner_scores])
+                    ),
+                    "brier": float(
+                        np.mean([score["brier"] for score in inner_scores])
+                    ),
+                })
+        selected = min(scores, key=lambda score: (score["log_loss"], score["brier"]))
+        final_model = build_model(selected["C"], selected["knots"])
+        final_model.fit(
+            outer_train[feature_cols].astype(float),
+            outer_train[TARGET_COL].astype(int),
+        )
+        labels = outer_validation[TARGET_COL].astype(int).to_numpy()
+        probabilities = final_model.predict_proba(
+            outer_validation[feature_cols].astype(float)
+        )[:, 1]
+        outer_labels.append(labels)
+        outer_predictions.append(probabilities)
+        season_rows.append({
+            "validation_season": validation_season,
+            "selected": selected,
+            "outer_metrics": _metrics(labels, probabilities),
+        })
+    labels = np.concatenate(outer_labels)
+    probabilities = np.concatenate(outer_predictions)
+    return {
+        "metrics": _metrics(labels, probabilities),
+        "outer_seasons": season_rows,
+        "oof_rows": int(len(labels)),
+        "feature_cols": feature_cols,
+        "spline_cols": spline_cols,
+    }
 
 
 @dataclass
