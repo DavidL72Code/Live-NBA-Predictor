@@ -22,6 +22,30 @@ DEFAULT_XGB_GRID = (
 )
 
 
+def _sample_events_per_game(df: pd.DataFrame, max_events_per_game: int | None) -> pd.DataFrame:
+    """Keep evenly spaced event states while retaining every game."""
+    if max_events_per_game is None:
+        return df
+    if max_events_per_game < 1:
+        raise ValueError("max_events_per_game must be positive or None")
+    ordered = df.sort_values(["game_id", "event_num"])
+    return (
+        ordered.groupby("game_id", group_keys=False, sort=False)
+        .apply(
+            lambda game: game.iloc[
+                np.linspace(
+                    0,
+                    len(game) - 1,
+                    min(max_events_per_game, len(game)),
+                    dtype=int,
+                )
+            ],
+            include_groups=True,
+        )
+        .reset_index(drop=True)
+    )
+
+
 def _metrics(labels, probabilities) -> dict[str, float]:
     from sklearn.metrics import brier_score_loss, log_loss, roc_auc_score
 
@@ -66,7 +90,7 @@ def walk_forward_folds(
     return folds
 
 
-def _xgb_params(overrides: dict | None = None, n_estimators: int = 1500) -> dict:
+def _xgb_params(overrides: dict | None = None, n_estimators: int = 200, n_jobs: int = 2) -> dict:
     params = {
         "n_estimators": n_estimators,
         "max_depth": 4,
@@ -79,6 +103,7 @@ def _xgb_params(overrides: dict | None = None, n_estimators: int = 1500) -> dict
         "eval_metric": "logloss",
         "tree_method": "hist",
         "random_state": 42,
+        "n_jobs": n_jobs,
         "early_stopping_rounds": 50,
     }
     params.update(overrides or {})
@@ -89,12 +114,15 @@ def fit_early_stopped_xgb(
     train_df: pd.DataFrame,
     validation_df: pd.DataFrame,
     params: dict | None = None,
-    n_estimators: int = 1500,
+    n_estimators: int = 200,
+    n_jobs: int = 2,
 ):
     """Fit XGBoost with a future validation set and best-iteration stopping."""
     import xgboost as xgb
 
-    model = xgb.XGBClassifier(**_xgb_params(params, n_estimators=n_estimators))
+    model = xgb.XGBClassifier(
+        **_xgb_params(params, n_estimators=n_estimators, n_jobs=n_jobs)
+    )
     model.fit(
         train_df[FEATURE_COLS].astype(float),
         train_df[TARGET_COL].astype(int),
@@ -111,7 +139,8 @@ def walk_forward_xgb_benchmark(
     df: pd.DataFrame,
     param_grid: tuple[dict, ...] | list[dict] = DEFAULT_XGB_GRID,
     min_train_seasons: int = 2,
-    n_estimators: int = 1500,
+    n_estimators: int = 200,
+    n_jobs: int = 2,
 ) -> pd.DataFrame:
     """Compare early-stopped XGBoost candidates on future seasons."""
     _validate(df)
@@ -123,7 +152,11 @@ def walk_forward_xgb_benchmark(
             train_df = df.iloc[train_idx]
             validation_df = df.iloc[validation_idx]
             model = fit_early_stopped_xgb(
-                train_df, validation_df, candidate, n_estimators=n_estimators
+                train_df,
+                validation_df,
+                candidate,
+                n_estimators=n_estimators,
+                n_jobs=n_jobs,
             )
             probabilities = model.predict_proba(
                 validation_df[FEATURE_COLS].astype(float)
@@ -206,11 +239,14 @@ def _blend_weights(predictions: np.ndarray, labels: np.ndarray) -> np.ndarray:
 def oof_ensemble_benchmark(
     df: pd.DataFrame,
     min_train_seasons: int = 2,
-    n_estimators: int = 1000,
+    n_estimators: int = 200,
+    n_jobs: int = 2,
 ) -> dict:
     """Build out-of-time OOF predictions and a nonnegative model blend."""
     from sklearn.ensemble import HistGradientBoostingClassifier
     from sklearn.linear_model import LogisticRegression
+    from sklearn.pipeline import make_pipeline
+    from sklearn.preprocessing import StandardScaler
 
     _validate(df)
     labels = []
@@ -224,12 +260,21 @@ def oof_ensemble_benchmark(
         x_validation = validation_df[FEATURE_COLS].astype(float)
         y_train = train_df[TARGET_COL].astype(int)
         xgb_model = fit_early_stopped_xgb(
-            train_df, validation_df, n_estimators=n_estimators
+            train_df,
+            validation_df,
+            n_estimators=n_estimators,
+            n_jobs=n_jobs,
         )
-        logistic = LogisticRegression(max_iter=1000, C=0.5)
+        logistic = make_pipeline(
+            StandardScaler(),
+            LogisticRegression(max_iter=1000, C=0.5),
+        )
         logistic.fit(x_train, y_train)
         hist = HistGradientBoostingClassifier(
-            max_iter=300, learning_rate=0.05, max_leaf_nodes=15, random_state=42
+            max_iter=300,
+            learning_rate=0.05,
+            max_leaf_nodes=15,
+            random_state=42,
         )
         hist.fit(x_train, y_train)
         predictions.append(np.column_stack((
@@ -283,7 +328,8 @@ def _final_margin(df: pd.DataFrame) -> pd.Series:
 def margin_distribution_benchmark(
     df: pd.DataFrame,
     min_train_seasons: int = 2,
-    n_estimators: int = 1000,
+    n_estimators: int = 200,
+    n_jobs: int = 2,
 ) -> pd.DataFrame:
     """Evaluate a final-margin Gaussian model on future seasons."""
     import xgboost as xgb
@@ -308,6 +354,7 @@ def margin_distribution_benchmark(
             eval_metric="rmse",
             tree_method="hist",
             random_state=42,
+            n_jobs=n_jobs,
             early_stopping_rounds=50,
         )
         # Each row is an event, but the target is one final margin per game.
@@ -335,12 +382,43 @@ def margin_distribution_benchmark(
 def run_advanced_benchmark(
     df: pd.DataFrame,
     min_train_seasons: int = 2,
+    n_estimators: int = 200,
+    n_jobs: int = 2,
+    candidates: int = 2,
+    max_events_per_game: int | None = 25,
 ) -> dict:
     """Run all requested experiments and return serializable summaries."""
-    xgb_results = walk_forward_xgb_benchmark(df, min_train_seasons=min_train_seasons)
-    ensemble = oof_ensemble_benchmark(df, min_train_seasons=min_train_seasons)
-    margin = margin_distribution_benchmark(df, min_train_seasons=min_train_seasons)
+    if not 1 <= candidates <= len(DEFAULT_XGB_GRID):
+        raise ValueError(f"candidates must be between 1 and {len(DEFAULT_XGB_GRID)}")
+    work = _sample_events_per_game(df, max_events_per_game)
+    xgb_results = walk_forward_xgb_benchmark(
+        work,
+        param_grid=DEFAULT_XGB_GRID[:candidates],
+        min_train_seasons=min_train_seasons,
+        n_estimators=n_estimators,
+        n_jobs=n_jobs,
+    )
+    ensemble = oof_ensemble_benchmark(
+        work,
+        min_train_seasons=min_train_seasons,
+        n_estimators=n_estimators,
+        n_jobs=n_jobs,
+    )
+    margin = margin_distribution_benchmark(
+        work,
+        min_train_seasons=min_train_seasons,
+        n_estimators=n_estimators,
+        n_jobs=n_jobs,
+    )
     return {
+        "config": {
+            "n_estimators": n_estimators,
+            "n_jobs": n_jobs,
+            "candidates": candidates,
+            "max_events_per_game": max_events_per_game,
+            "rows": int(len(work)),
+            "games": int(work["game_id"].nunique()),
+        },
         "walk_forward_xgb": xgb_results.to_dict(orient="records"),
         "oof_ensemble": ensemble,
         "margin_distribution": margin.to_dict(orient="records"),

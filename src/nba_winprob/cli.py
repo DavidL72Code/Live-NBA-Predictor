@@ -271,7 +271,14 @@ def cmd_benchmark(args: argparse.Namespace) -> int:
     from nba_winprob.training.advanced import run_advanced_benchmark
 
     frame = pd.read_parquet(args.parquet)
-    result = run_advanced_benchmark(frame, min_train_seasons=args.min_train_seasons)
+    result = run_advanced_benchmark(
+        frame,
+        min_train_seasons=args.min_train_seasons,
+        n_estimators=args.n_estimators,
+        n_jobs=args.n_jobs,
+        candidates=args.candidates,
+        max_events_per_game=args.max_events_per_game,
+    )
     output = json.dumps(result, indent=2, default=lambda value: value.tolist())
     if args.output:
         Path(args.output).write_text(output + "\n", encoding="utf-8")
@@ -386,6 +393,22 @@ def main(argv: list[str] | None = None) -> int:
     benchmark_cmd.add_argument(
         "--min-train-seasons", type=int, default=2,
         help="number of earliest seasons required before the first validation season",
+    )
+    benchmark_cmd.add_argument(
+        "--n-estimators", type=int, default=200,
+        help="maximum trees per candidate before early stopping",
+    )
+    benchmark_cmd.add_argument(
+        "--n-jobs", type=int, default=2,
+        help="XGBoost worker threads",
+    )
+    benchmark_cmd.add_argument(
+        "--candidates", type=int, default=2,
+        help="number of XGBoost parameter candidates to evaluate",
+    )
+    benchmark_cmd.add_argument(
+        "--max-events-per-game", type=int, default=25,
+        help="evenly spaced event rows retained per game for benchmarking",
     )
     benchmark_cmd.add_argument("--output", default=None, help="optional JSON output path")
     benchmark_cmd.set_defaults(func=cmd_benchmark)
