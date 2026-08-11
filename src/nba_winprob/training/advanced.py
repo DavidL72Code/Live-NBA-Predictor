@@ -241,6 +241,7 @@ def oof_ensemble_benchmark(
     min_train_seasons: int = 2,
     n_estimators: int = 200,
     n_jobs: int = 2,
+    include_hist: bool = False,
 ) -> dict:
     """Build out-of-time OOF predictions and a nonnegative model blend."""
     from sklearn.ensemble import HistGradientBoostingClassifier
@@ -251,6 +252,7 @@ def oof_ensemble_benchmark(
     _validate(df)
     labels = []
     predictions = []
+    best_iterations = []
     for train_idx, validation_idx, _, _ in walk_forward_folds(
         df, min_train_seasons=min_train_seasons
     ):
@@ -265,23 +267,26 @@ def oof_ensemble_benchmark(
             n_estimators=n_estimators,
             n_jobs=n_jobs,
         )
+        best_iterations.append(int(getattr(xgb_model, "best_iteration", n_estimators - 1)))
         logistic = make_pipeline(
             StandardScaler(),
             LogisticRegression(max_iter=1000, C=0.5),
         )
         logistic.fit(x_train, y_train)
-        hist = HistGradientBoostingClassifier(
-            max_iter=300,
-            learning_rate=0.05,
-            max_leaf_nodes=15,
-            random_state=42,
-        )
-        hist.fit(x_train, y_train)
-        predictions.append(np.column_stack((
+        fold_predictions = [
             xgb_model.predict_proba(x_validation)[:, 1],
             logistic.predict_proba(x_validation)[:, 1],
-            hist.predict_proba(x_validation)[:, 1],
-        )))
+        ]
+        if include_hist:
+            hist = HistGradientBoostingClassifier(
+                max_iter=300,
+                learning_rate=0.05,
+                max_leaf_nodes=15,
+                random_state=42,
+            )
+            hist.fit(x_train, y_train)
+            fold_predictions.append(hist.predict_proba(x_validation)[:, 1])
+        predictions.append(np.column_stack(fold_predictions))
         labels.append(validation_df[TARGET_COL].astype(int).to_numpy())
 
     matrix = np.vstack(predictions)
@@ -289,15 +294,19 @@ def oof_ensemble_benchmark(
     weights = _blend_weights(matrix, y)
     blended = np.clip(matrix @ weights, 1e-6, 1 - 1e-6)
     beta = BetaCalibrator().fit(blended, y)
+    model_names = ["xgboost", "logistic"]
+    if include_hist:
+        model_names.append("hist_gradient_boosting")
     return {
         "weights": weights,
         "base_metrics": {
             name: _metrics(y, matrix[:, index])
-            for index, name in enumerate(("xgboost", "logistic", "hist_gradient_boosting"))
+            for index, name in enumerate(model_names)
         },
         "blend_metrics": _metrics(y, blended),
         "blend_beta_metrics": _metrics(y, beta.predict(blended)),
         "oof_rows": int(len(y)),
+        "xgb_best_iterations": best_iterations,
     }
 
 
