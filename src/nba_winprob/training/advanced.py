@@ -325,6 +325,7 @@ def oof_ensemble_benchmark(
     n_jobs: int = 2,
     include_hist: bool = False,
     feature_cols: list[str] | None = None,
+    logistic_C: float = 0.5,
 ) -> dict:
     """Evaluate blend and beta calibration with nested walk-forward folds.
 
@@ -374,7 +375,7 @@ def oof_ensemble_benchmark(
             y_train = inner_train[TARGET_COL].astype(int)
             logistic = make_pipeline(
                 StandardScaler(),
-                LogisticRegression(max_iter=1000, C=0.5),
+                LogisticRegression(max_iter=1000, C=logistic_C),
             )
             logistic.fit(x_train, y_train)
             fold_predictions = [
@@ -417,7 +418,7 @@ def oof_ensemble_benchmark(
         )
         final_logistic = make_pipeline(
             StandardScaler(),
-            LogisticRegression(max_iter=1000, C=0.5),
+            LogisticRegression(max_iter=1000, C=logistic_C),
         )
         final_logistic.fit(
             outer_train[feature_cols].astype(float),
