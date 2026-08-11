@@ -103,6 +103,40 @@ def _game_bootstrap_intervals(
     }
 
 
+def _paired_game_bootstrap_delta(
+    game_ids,
+    labels,
+    first: np.ndarray,
+    second: np.ndarray,
+    samples: int = 500,
+    seed: int = 42,
+) -> dict[str, dict[str, float]]:
+    """Bootstrap metric deltas for two predictions on the same games."""
+    ids = np.asarray(game_ids)
+    y = np.asarray(labels, dtype=int)
+    unique_games = np.unique(ids)
+    game_rows = {game: np.flatnonzero(ids == game) for game in unique_games}
+    rng = np.random.default_rng(seed)
+    values = {metric: [] for metric in ("brier", "log_loss", "roc_auc")}
+    for _ in range(samples):
+        sampled_games = rng.choice(unique_games, size=len(unique_games), replace=True)
+        indices = np.concatenate([game_rows[game] for game in sampled_games])
+        first_metrics = _metrics(y[indices], first[indices])
+        second_metrics = _metrics(y[indices], second[indices])
+        for metric in values:
+            delta = second_metrics[metric] - first_metrics[metric]
+            if np.isfinite(delta):
+                values[metric].append(delta)
+    return {
+        metric: {
+            "mean": float(np.mean(metric_values)),
+            "lower": float(np.percentile(metric_values, 2.5)),
+            "upper": float(np.percentile(metric_values, 97.5)),
+        }
+        for metric, metric_values in values.items()
+    }
+
+
 def _season_start(df: pd.DataFrame) -> pd.Series:
     if "season" in df.columns:
         values = df["season"].astype(str).str.extract(r"^(\d{4})", expand=False)
@@ -310,6 +344,126 @@ def nested_game_logistic_benchmark(
         "game_bootstrap_95": _game_bootstrap_intervals(
             np.concatenate(game_ids), y, {"logistic": p}
         ),
+        "oof_rows": int(len(y)),
+    }
+
+
+def nested_game_xgb_vs_logistic(
+    df: pd.DataFrame,
+    feature_cols: list[str] | None = None,
+    feature_sets: dict[str, list[str]] | None = None,
+    n_estimators: int = 150,
+    n_jobs: int = 2,
+    c_grid: tuple[float, ...] = (0.5, 1.0, 3.0, 10.0, 30.0, 100.0),
+) -> dict:
+    """Paired rolling-fold comparison with inner selection for both models."""
+    import xgboost as xgb
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.pipeline import make_pipeline
+    from sklearn.preprocessing import StandardScaler
+
+    labels = []
+    xgb_predictions = []
+    logistic_predictions = []
+    game_ids = []
+    folds = []
+    if feature_sets is None:
+        feature_sets = {"selected": feature_cols or FEATURE_COLS}
+    for train_idx, validation_idx, train_end, validation_end in walk_forward_game_folds(df):
+        outer_train = df.iloc[train_idx]
+        outer_validation = df.iloc[validation_idx]
+        inner_folds = walk_forward_game_folds(
+            outer_train,
+            min_train_games=500,
+            validation_games=500,
+            step_games=500,
+        )
+        logistic_scores = []
+        for set_name, selected_features in feature_sets.items():
+            for c_value in c_grid:
+                scores = []
+                for inner_train_idx, inner_validation_idx, _, _ in inner_folds:
+                    inner_train = outer_train.iloc[inner_train_idx]
+                    inner_validation = outer_train.iloc[inner_validation_idx]
+                    logistic = make_pipeline(
+                        StandardScaler(), LogisticRegression(max_iter=1000, C=c_value)
+                    )
+                    logistic.fit(
+                        inner_train[selected_features].astype(float),
+                        inner_train[TARGET_COL].astype(int),
+                    )
+                    scores.append(_metrics(
+                        inner_validation[TARGET_COL],
+                        logistic.predict_proba(
+                            inner_validation[selected_features].astype(float)
+                        )[:, 1],
+                    ))
+                logistic_scores.append({
+                    "feature_set": set_name,
+                    "C": c_value,
+                    "log_loss": float(np.mean([score["log_loss"] for score in scores])),
+                    "brier": float(np.mean([score["brier"] for score in scores])),
+                })
+        selected = min(logistic_scores, key=lambda score: (score["log_loss"], score["brier"]))
+        selected_features = feature_sets[selected["feature_set"]]
+        xgb_iterations = []
+        for inner_train_idx, inner_validation_idx, _, _ in inner_folds:
+            xgb_model = fit_early_stopped_xgb(
+                outer_train.iloc[inner_train_idx],
+                outer_train.iloc[inner_validation_idx],
+                n_estimators=n_estimators,
+                n_jobs=n_jobs,
+                feature_cols=selected_features,
+            )
+            xgb_iterations.append(
+                int(getattr(xgb_model, "best_iteration", n_estimators - 1))
+            )
+        xgb_params = _xgb_params(
+            n_estimators=max(1, int(np.mean(xgb_iterations)) + 1),
+            n_jobs=n_jobs,
+        )
+        xgb_params.pop("early_stopping_rounds", None)
+        final_xgb = xgb.XGBClassifier(**xgb_params)
+        final_xgb.fit(
+            outer_train[selected_features].astype(float),
+            outer_train[TARGET_COL].astype(int),
+            verbose=False,
+        )
+        final_logistic = make_pipeline(
+            StandardScaler(), LogisticRegression(max_iter=1000, C=selected["C"])
+        )
+        final_logistic.fit(
+            outer_train[selected_features].astype(float),
+            outer_train[TARGET_COL].astype(int),
+        )
+        labels.append(outer_validation[TARGET_COL].astype(int).to_numpy())
+        xgb_predictions.append(
+            final_xgb.predict_proba(outer_validation[selected_features].astype(float))[:, 1]
+        )
+        logistic_predictions.append(
+            final_logistic.predict_proba(
+                outer_validation[selected_features].astype(float)
+            )[:, 1]
+        )
+        game_ids.append(outer_validation["game_id"].to_numpy())
+        folds.append({
+            "train_end": train_end,
+            "validation_end": validation_end,
+            "xgb_best_iterations": xgb_iterations,
+            "selected": selected,
+            "xgb_metrics": _metrics(labels[-1], xgb_predictions[-1]),
+            "logistic_metrics": _metrics(labels[-1], logistic_predictions[-1]),
+        })
+    y = np.concatenate(labels)
+    xgb_p = np.concatenate(xgb_predictions)
+    logistic_p = np.concatenate(logistic_predictions)
+    return {
+        "xgb_metrics": _metrics(y, xgb_p),
+        "logistic_metrics": _metrics(y, logistic_p),
+        "paired_logistic_minus_xgb": _paired_game_bootstrap_delta(
+            np.concatenate(game_ids), y, xgb_p, logistic_p
+        ),
+        "outer_folds": folds,
         "oof_rows": int(len(y)),
     }
 
