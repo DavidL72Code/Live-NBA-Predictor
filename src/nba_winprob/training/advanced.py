@@ -12,7 +12,13 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from nba_winprob.training.train import FEATURE_COLS, TARGET_COL, _validate
+from nba_winprob.training.train import (
+    FEATURE_COLS,
+    TARGET_COL,
+    _validate,
+    apply_temperature,
+    fit_temperature,
+)
 
 DEFAULT_XGB_GRID = (
     {"max_depth": 3, "min_child_weight": 5, "learning_rate": 0.03},
@@ -116,18 +122,20 @@ def fit_early_stopped_xgb(
     params: dict | None = None,
     n_estimators: int = 200,
     n_jobs: int = 2,
+    feature_cols: list[str] | None = None,
 ):
     """Fit XGBoost with a future validation set and best-iteration stopping."""
     import xgboost as xgb
 
+    feature_cols = feature_cols or FEATURE_COLS
     model = xgb.XGBClassifier(
         **_xgb_params(params, n_estimators=n_estimators, n_jobs=n_jobs)
     )
     model.fit(
-        train_df[FEATURE_COLS].astype(float),
+        train_df[feature_cols].astype(float),
         train_df[TARGET_COL].astype(int),
         eval_set=[(
-            validation_df[FEATURE_COLS].astype(float),
+            validation_df[feature_cols].astype(float),
             validation_df[TARGET_COL].astype(int),
         )],
         verbose=False,
@@ -316,6 +324,7 @@ def oof_ensemble_benchmark(
     n_estimators: int = 200,
     n_jobs: int = 2,
     include_hist: bool = False,
+    feature_cols: list[str] | None = None,
 ) -> dict:
     """Evaluate blend and beta calibration with nested walk-forward folds.
 
@@ -328,6 +337,7 @@ def oof_ensemble_benchmark(
     from sklearn.preprocessing import StandardScaler
 
     _validate(df)
+    feature_cols = feature_cols or FEATURE_COLS
     outer_labels = []
     outer_blends = []
     season_rows = []
@@ -354,12 +364,13 @@ def oof_ensemble_benchmark(
                 inner_validation,
                 n_estimators=n_estimators,
                 n_jobs=n_jobs,
+                feature_cols=feature_cols,
             )
             inner_iterations.append(
                 int(getattr(xgb_model, "best_iteration", n_estimators - 1))
             )
-            x_train = inner_train[FEATURE_COLS].astype(float)
-            x_validation = inner_validation[FEATURE_COLS].astype(float)
+            x_train = inner_train[feature_cols].astype(float)
+            x_validation = inner_validation[feature_cols].astype(float)
             y_train = inner_train[TARGET_COL].astype(int)
             logistic = make_pipeline(
                 StandardScaler(),
@@ -389,6 +400,9 @@ def oof_ensemble_benchmark(
         weights = _blend_weights(inner_matrix, inner_y)
         inner_blended = np.clip(inner_matrix @ weights, 1e-6, 1 - 1e-6)
         beta = BetaCalibrator().fit(inner_blended, inner_y)
+        temperature, _ = fit_temperature(inner_blended, inner_y)
+        logistic_beta = BetaCalibrator().fit(inner_matrix[:, 1], inner_y)
+        logistic_temperature, _ = fit_temperature(inner_matrix[:, 1], inner_y)
 
         final_estimators = max(1, int(np.mean(inner_iterations)) + 1)
         final_params = _xgb_params(n_estimators=final_estimators, n_jobs=n_jobs)
@@ -397,7 +411,7 @@ def oof_ensemble_benchmark(
 
         final_xgb = xgb.XGBClassifier(**final_params)
         final_xgb.fit(
-            outer_train[FEATURE_COLS].astype(float),
+            outer_train[feature_cols].astype(float),
             outer_train[TARGET_COL].astype(int),
             verbose=False,
         )
@@ -406,12 +420,12 @@ def oof_ensemble_benchmark(
             LogisticRegression(max_iter=1000, C=0.5),
         )
         final_logistic.fit(
-            outer_train[FEATURE_COLS].astype(float),
+            outer_train[feature_cols].astype(float),
             outer_train[TARGET_COL].astype(int),
         )
         outer_predictions = [
-            final_xgb.predict_proba(outer_validation[FEATURE_COLS].astype(float))[:, 1],
-            final_logistic.predict_proba(outer_validation[FEATURE_COLS].astype(float))[:, 1],
+            final_xgb.predict_proba(outer_validation[feature_cols].astype(float))[:, 1],
+            final_logistic.predict_proba(outer_validation[feature_cols].astype(float))[:, 1],
         ]
         if include_hist:
             from sklearn.ensemble import HistGradientBoostingClassifier
@@ -423,37 +437,103 @@ def oof_ensemble_benchmark(
                 random_state=42,
             )
             final_hist.fit(
-                outer_train[FEATURE_COLS].astype(float),
+                outer_train[feature_cols].astype(float),
                 outer_train[TARGET_COL].astype(int),
             )
             outer_predictions.append(
-                final_hist.predict_proba(outer_validation[FEATURE_COLS].astype(float))[:, 1]
+                final_hist.predict_proba(outer_validation[feature_cols].astype(float))[:, 1]
             )
         outer_matrix = np.column_stack(outer_predictions)
         outer_blend = np.clip(outer_matrix @ weights, 1e-6, 1 - 1e-6)
         outer_beta = beta.predict(outer_blend)
+        outer_temperature = apply_temperature(outer_blend, temperature)
+        outer_logistic_beta = logistic_beta.predict(outer_matrix[:, 1])
+        outer_logistic_temperature = apply_temperature(
+            outer_matrix[:, 1], logistic_temperature
+        )
         labels = outer_validation[TARGET_COL].astype(int).to_numpy()
         outer_labels.append(labels)
-        outer_blends.append(np.column_stack((outer_blend, outer_beta)))
+        outer_blends.append(
+            np.column_stack((
+                outer_matrix,
+                outer_blend,
+                outer_beta,
+                outer_temperature,
+                outer_logistic_beta,
+                outer_logistic_temperature,
+            ))
+        )
         season_rows.append({
             "validation_season": validation_season,
             "weights": weights.tolist(),
             "inner_best_iterations": inner_iterations,
             "final_n_estimators": final_estimators,
+            "temperature": temperature,
+            "xgboost_metrics": _metrics(labels, outer_matrix[:, 0]),
+            "logistic_metrics": _metrics(labels, outer_matrix[:, 1]),
             "blend_metrics": _metrics(labels, outer_blend),
             "blend_beta_metrics": _metrics(labels, outer_beta),
+            "blend_temperature_metrics": _metrics(labels, outer_temperature),
+            "logistic_beta_metrics": _metrics(labels, outer_logistic_beta),
+            "logistic_temperature_metrics": _metrics(
+                labels, outer_logistic_temperature
+            ),
         })
 
     y = np.concatenate(outer_labels)
     predictions = np.vstack(outer_blends)
     return {
-        "base_metrics": {},
-        "blend_metrics": _metrics(y, predictions[:, 0]),
-        "blend_beta_metrics": _metrics(y, predictions[:, 1]),
+        "base_metrics": {
+            "xgboost": _metrics(y, predictions[:, 0]),
+            "logistic": _metrics(y, predictions[:, 1]),
+        },
+        "blend_metrics": _metrics(y, predictions[:, 2]),
+        "blend_beta_metrics": _metrics(y, predictions[:, 3]),
+        "blend_temperature_metrics": _metrics(y, predictions[:, 4]),
+        "logistic_beta_metrics": _metrics(y, predictions[:, 5]),
+        "logistic_temperature_metrics": _metrics(y, predictions[:, 6]),
         "oof_rows": int(len(y)),
         "outer_seasons": season_rows,
         "model_names": model_names,
     }
+
+
+FEATURE_GROUPS = {
+    "live_state": [
+        "seconds_remaining", "seconds_elapsed", "score_diff", "score_diff_norm",
+        "run_home", "run_away", "run_diff", "is_overtime",
+    ],
+    "pregame_context": [
+        "home_win_pct", "home_avg_margin", "home_streak",
+        "away_win_pct", "away_avg_margin", "away_streak",
+    ],
+    "venue_form": [
+        "home_venue_win_pct", "home_venue_avg_margin",
+        "away_venue_win_pct", "away_venue_avg_margin",
+    ],
+    "elo": ["home_elo_rating", "away_elo_rating"],
+}
+
+
+def feature_group_ablation_benchmark(
+    df: pd.DataFrame,
+    min_train_seasons: int = 2,
+    n_estimators: int = 200,
+    n_jobs: int = 2,
+) -> dict[str, dict]:
+    """Measure nested outer-season impact of removing each feature group."""
+    results = {}
+    for group_name, removed in FEATURE_GROUPS.items():
+        selected = [column for column in FEATURE_COLS if column not in removed]
+        results[group_name] = oof_ensemble_benchmark(
+            df,
+            min_train_seasons=min_train_seasons,
+            n_estimators=n_estimators,
+            n_jobs=n_jobs,
+            include_hist=False,
+            feature_cols=selected,
+        )
+    return results
 
 
 @dataclass
