@@ -236,7 +236,7 @@ def _blend_weights(predictions: np.ndarray, labels: np.ndarray) -> np.ndarray:
     return np.asarray(result.x, dtype=float)
 
 
-def oof_ensemble_benchmark(
+def _pooled_oof_ensemble_benchmark(
     df: pd.DataFrame,
     min_train_seasons: int = 2,
     n_estimators: int = 200,
@@ -307,6 +307,152 @@ def oof_ensemble_benchmark(
         "blend_beta_metrics": _metrics(y, beta.predict(blended)),
         "oof_rows": int(len(y)),
         "xgb_best_iterations": best_iterations,
+    }
+
+
+def oof_ensemble_benchmark(
+    df: pd.DataFrame,
+    min_train_seasons: int = 2,
+    n_estimators: int = 200,
+    n_jobs: int = 2,
+    include_hist: bool = False,
+) -> dict:
+    """Evaluate blend and beta calibration with nested walk-forward folds.
+
+    The outer future season is never used to learn blend weights or the beta
+    calibrator. Inner historical folds learn those choices, preventing OOF
+    model-selection leakage.
+    """
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.pipeline import make_pipeline
+    from sklearn.preprocessing import StandardScaler
+
+    _validate(df)
+    outer_labels = []
+    outer_blends = []
+    season_rows = []
+    model_names = ["xgboost", "logistic"]
+    if include_hist:
+        model_names.append("hist_gradient_boosting")
+
+    for train_idx, validation_idx, _, validation_season in walk_forward_folds(
+        df, min_train_seasons=min_train_seasons
+    ):
+        outer_train = df.iloc[train_idx]
+        outer_validation = df.iloc[validation_idx]
+        inner_predictions = []
+        inner_labels = []
+        inner_iterations = []
+
+        for inner_train_idx, inner_validation_idx, _, _ in walk_forward_folds(
+            outer_train, min_train_seasons=1
+        ):
+            inner_train = outer_train.iloc[inner_train_idx]
+            inner_validation = outer_train.iloc[inner_validation_idx]
+            xgb_model = fit_early_stopped_xgb(
+                inner_train,
+                inner_validation,
+                n_estimators=n_estimators,
+                n_jobs=n_jobs,
+            )
+            inner_iterations.append(
+                int(getattr(xgb_model, "best_iteration", n_estimators - 1))
+            )
+            x_train = inner_train[FEATURE_COLS].astype(float)
+            x_validation = inner_validation[FEATURE_COLS].astype(float)
+            y_train = inner_train[TARGET_COL].astype(int)
+            logistic = make_pipeline(
+                StandardScaler(),
+                LogisticRegression(max_iter=1000, C=0.5),
+            )
+            logistic.fit(x_train, y_train)
+            fold_predictions = [
+                xgb_model.predict_proba(x_validation)[:, 1],
+                logistic.predict_proba(x_validation)[:, 1],
+            ]
+            if include_hist:
+                from sklearn.ensemble import HistGradientBoostingClassifier
+
+                hist = HistGradientBoostingClassifier(
+                    max_iter=300,
+                    learning_rate=0.05,
+                    max_leaf_nodes=15,
+                    random_state=42,
+                )
+                hist.fit(x_train, y_train)
+                fold_predictions.append(hist.predict_proba(x_validation)[:, 1])
+            inner_predictions.append(np.column_stack(fold_predictions))
+            inner_labels.append(inner_validation[TARGET_COL].astype(int).to_numpy())
+
+        inner_matrix = np.vstack(inner_predictions)
+        inner_y = np.concatenate(inner_labels)
+        weights = _blend_weights(inner_matrix, inner_y)
+        inner_blended = np.clip(inner_matrix @ weights, 1e-6, 1 - 1e-6)
+        beta = BetaCalibrator().fit(inner_blended, inner_y)
+
+        final_estimators = max(1, int(np.mean(inner_iterations)) + 1)
+        final_params = _xgb_params(n_estimators=final_estimators, n_jobs=n_jobs)
+        final_params.pop("early_stopping_rounds", None)
+        import xgboost as xgb
+
+        final_xgb = xgb.XGBClassifier(**final_params)
+        final_xgb.fit(
+            outer_train[FEATURE_COLS].astype(float),
+            outer_train[TARGET_COL].astype(int),
+            verbose=False,
+        )
+        final_logistic = make_pipeline(
+            StandardScaler(),
+            LogisticRegression(max_iter=1000, C=0.5),
+        )
+        final_logistic.fit(
+            outer_train[FEATURE_COLS].astype(float),
+            outer_train[TARGET_COL].astype(int),
+        )
+        outer_predictions = [
+            final_xgb.predict_proba(outer_validation[FEATURE_COLS].astype(float))[:, 1],
+            final_logistic.predict_proba(outer_validation[FEATURE_COLS].astype(float))[:, 1],
+        ]
+        if include_hist:
+            from sklearn.ensemble import HistGradientBoostingClassifier
+
+            final_hist = HistGradientBoostingClassifier(
+                max_iter=300,
+                learning_rate=0.05,
+                max_leaf_nodes=15,
+                random_state=42,
+            )
+            final_hist.fit(
+                outer_train[FEATURE_COLS].astype(float),
+                outer_train[TARGET_COL].astype(int),
+            )
+            outer_predictions.append(
+                final_hist.predict_proba(outer_validation[FEATURE_COLS].astype(float))[:, 1]
+            )
+        outer_matrix = np.column_stack(outer_predictions)
+        outer_blend = np.clip(outer_matrix @ weights, 1e-6, 1 - 1e-6)
+        outer_beta = beta.predict(outer_blend)
+        labels = outer_validation[TARGET_COL].astype(int).to_numpy()
+        outer_labels.append(labels)
+        outer_blends.append(np.column_stack((outer_blend, outer_beta)))
+        season_rows.append({
+            "validation_season": validation_season,
+            "weights": weights.tolist(),
+            "inner_best_iterations": inner_iterations,
+            "final_n_estimators": final_estimators,
+            "blend_metrics": _metrics(labels, outer_blend),
+            "blend_beta_metrics": _metrics(labels, outer_beta),
+        })
+
+    y = np.concatenate(outer_labels)
+    predictions = np.vstack(outer_blends)
+    return {
+        "base_metrics": {},
+        "blend_metrics": _metrics(y, predictions[:, 0]),
+        "blend_beta_metrics": _metrics(y, predictions[:, 1]),
+        "oof_rows": int(len(y)),
+        "outer_seasons": season_rows,
+        "model_names": model_names,
     }
 
 
