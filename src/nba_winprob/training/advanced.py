@@ -135,6 +135,185 @@ def walk_forward_folds(
     return folds
 
 
+def walk_forward_game_folds(
+    df: pd.DataFrame,
+    min_train_games: int = 1500,
+    validation_games: int = 500,
+    step_games: int = 500,
+) -> list[tuple[np.ndarray, np.ndarray, str, str]]:
+    """Create rolling chronological folds using complete games as units."""
+    games = (
+        df[["game_id"]]
+        .drop_duplicates()
+        .sort_values("game_id")["game_id"]
+        .astype(str)
+        .to_numpy()
+    )
+    if len(games) <= min_train_games + validation_games:
+        raise ValueError("not enough games for rolling chronological folds")
+    folds = []
+    for start in range(
+        min_train_games,
+        len(games) - validation_games + 1,
+        step_games,
+    ):
+        train_games = set(games[:start])
+        validation_games_set = set(games[start:start + validation_games])
+        train_mask = df["game_id"].astype(str).isin(train_games).to_numpy()
+        validation_mask = df["game_id"].astype(str).isin(validation_games_set).to_numpy()
+        folds.append((
+            np.flatnonzero(train_mask),
+            np.flatnonzero(validation_mask),
+            str(games[start - 1]),
+            str(games[start + validation_games - 1]),
+        ))
+    return folds
+
+
+def nested_game_xgb_benchmark(
+    df: pd.DataFrame,
+    n_estimators: int = 250,
+    n_jobs: int = 2,
+    feature_cols: list[str] | None = None,
+) -> dict:
+    """Evaluate XGBoost on rolling game-time outer folds without outer leakage."""
+    import xgboost as xgb
+
+    feature_cols = feature_cols or FEATURE_COLS
+    labels = []
+    predictions = []
+    game_ids = []
+    seasons = []
+    for train_idx, validation_idx, train_end, validation_end in walk_forward_game_folds(df):
+        outer_train = df.iloc[train_idx]
+        outer_validation = df.iloc[validation_idx]
+        inner_iterations = []
+        for inner_train_idx, inner_validation_idx, _, _ in walk_forward_game_folds(
+            outer_train,
+            min_train_games=500,
+            validation_games=500,
+            step_games=500,
+        ):
+            model = fit_early_stopped_xgb(
+                outer_train.iloc[inner_train_idx],
+                outer_train.iloc[inner_validation_idx],
+                n_estimators=n_estimators,
+                n_jobs=n_jobs,
+                feature_cols=feature_cols,
+            )
+            inner_iterations.append(
+                int(getattr(model, "best_iteration", n_estimators - 1))
+            )
+        final_params = _xgb_params(
+            n_estimators=max(1, int(np.mean(inner_iterations)) + 1),
+            n_jobs=n_jobs,
+        )
+        final_params.pop("early_stopping_rounds", None)
+        final_model = xgb.XGBClassifier(**final_params)
+        final_model.fit(
+            outer_train[feature_cols].astype(float),
+            outer_train[TARGET_COL].astype(int),
+            verbose=False,
+        )
+        probabilities = final_model.predict_proba(
+            outer_validation[feature_cols].astype(float)
+        )[:, 1]
+        labels.append(outer_validation[TARGET_COL].astype(int).to_numpy())
+        predictions.append(probabilities)
+        game_ids.append(outer_validation["game_id"].to_numpy())
+        seasons.append({
+            "train_end": train_end,
+            "validation_end": validation_end,
+            "inner_best_iterations": inner_iterations,
+            "metrics": _metrics(labels[-1], probabilities),
+        })
+    y = np.concatenate(labels)
+    p = np.concatenate(predictions)
+    return {
+        "metrics": _metrics(y, p),
+        "outer_folds": seasons,
+        "game_bootstrap_95": _game_bootstrap_intervals(
+            np.concatenate(game_ids), y, {"xgboost": p}
+        ),
+        "oof_rows": int(len(y)),
+    }
+
+
+def nested_game_logistic_benchmark(
+    df: pd.DataFrame,
+    feature_cols: list[str],
+    c_grid: tuple[float, ...] = (0.5, 1.0, 3.0, 10.0, 30.0, 100.0),
+) -> dict:
+    """Evaluate regularized logistic regression on rolling game-time folds."""
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.pipeline import make_pipeline
+    from sklearn.preprocessing import StandardScaler
+
+    labels = []
+    predictions = []
+    game_ids = []
+    seasons = []
+    for train_idx, validation_idx, train_end, validation_end in walk_forward_game_folds(df):
+        outer_train = df.iloc[train_idx]
+        outer_validation = df.iloc[validation_idx]
+        scores = []
+        for c_value in c_grid:
+            inner_scores = []
+            for inner_train_idx, inner_validation_idx, _, _ in walk_forward_game_folds(
+                outer_train,
+                min_train_games=500,
+                validation_games=500,
+                step_games=500,
+            ):
+                inner_train = outer_train.iloc[inner_train_idx]
+                inner_validation = outer_train.iloc[inner_validation_idx]
+                model = make_pipeline(
+                    StandardScaler(), LogisticRegression(max_iter=1000, C=c_value)
+                )
+                model.fit(
+                    inner_train[feature_cols].astype(float),
+                    inner_train[TARGET_COL].astype(int),
+                )
+                inner_scores.append(_metrics(
+                    inner_validation[TARGET_COL],
+                    model.predict_proba(inner_validation[feature_cols].astype(float))[:, 1],
+                ))
+            scores.append({
+                "C": c_value,
+                "log_loss": float(np.mean([score["log_loss"] for score in inner_scores])),
+                "brier": float(np.mean([score["brier"] for score in inner_scores])),
+            })
+        selected = min(scores, key=lambda score: (score["log_loss"], score["brier"]))
+        model = make_pipeline(
+            StandardScaler(), LogisticRegression(max_iter=1000, C=selected["C"])
+        )
+        model.fit(
+            outer_train[feature_cols].astype(float),
+            outer_train[TARGET_COL].astype(int),
+        )
+        y = outer_validation[TARGET_COL].astype(int).to_numpy()
+        p = model.predict_proba(outer_validation[feature_cols].astype(float))[:, 1]
+        labels.append(y)
+        predictions.append(p)
+        game_ids.append(outer_validation["game_id"].to_numpy())
+        seasons.append({
+            "train_end": train_end,
+            "validation_end": validation_end,
+            "selected": selected,
+            "metrics": _metrics(y, p),
+        })
+    y = np.concatenate(labels)
+    p = np.concatenate(predictions)
+    return {
+        "metrics": _metrics(y, p),
+        "outer_folds": seasons,
+        "game_bootstrap_95": _game_bootstrap_intervals(
+            np.concatenate(game_ids), y, {"logistic": p}
+        ),
+        "oof_rows": int(len(y)),
+    }
+
+
 def _xgb_params(overrides: dict | None = None, n_estimators: int = 200, n_jobs: int = 2) -> dict:
     params = {
         "n_estimators": n_estimators,
