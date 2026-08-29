@@ -527,7 +527,7 @@
           </div>
           <div class="desk-card">
             <span class="desk-label">Product signal</span>
-            <span class="desk-value">.164</span>
+            <span class="desk-value">.151</span>
             <span class="desk-note">Raw model Brier</span>
           </div>
         </section>
@@ -692,7 +692,9 @@ function showHome() {
   document.getElementById('game-detail').style.display = 'none';
 }
 
-loadScoreboard(state.date);
+// The initial load runs at the end of this script: it reaches updateTeamCatalogBar(),
+// which reads the TEAM_DIRECTORY const declared further down, so calling it here
+// throws a temporal-dead-zone error and the slate never finishes loading.
 setInterval(() => {
   if (state.selectedGame?.status !== 'Live' || !state.lastLiveUpdate) return;
   const age = Date.now() - state.lastLiveUpdate;
@@ -2266,6 +2268,8 @@ function formatDate(dateStr) {
   const d = new Date(dateStr + 'T12:00:00');
   return d.toLocaleDateString('en-US', {weekday: 'short', month: 'short', day: 'numeric', year: 'numeric'});
 }
+
+loadScoreboard(state.date);
 </script>
 </body>
 </html>

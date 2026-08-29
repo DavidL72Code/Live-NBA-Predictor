@@ -1,4 +1,4 @@
-"""Load and serve the trained XGBoost + isotonic calibrator.
+"""Load and serve trained win-probability models.
 
 WinProbServer wraps the two-stage pipeline (raw XGBoost score → isotonic
 calibration) and exposes a single ``predict(feature) -> float`` method.
@@ -15,6 +15,9 @@ from pathlib import Path
 from nba_winprob.schemas import FeatureVector
 from nba_winprob.training.train import FEATURE_COLS
 
+# Smallest probability the serving layer will report, in either direction.
+PROBABILITY_FLOOR = 1e-6
+
 
 class _TrustedArtifactUnpickler(pickle.Unpickler):
     """Reject executable or unexpected globals in legacy calibrator artifacts."""
@@ -26,6 +29,13 @@ class _TrustedArtifactUnpickler(pickle.Unpickler):
         ("numpy._core.multiarray", "scalar"),
         ("numpy._core.multiarray", "_reconstruct"),
         ("nba_winprob.training.advanced", "BetaCalibrator"),
+        ("sklearn.pipeline", "Pipeline"),
+        ("sklearn.preprocessing._data", "StandardScaler"),
+        ("sklearn.linear_model._logistic", "LogisticRegression"),
+        ("sklearn.preprocessing._function_transformer", "FunctionTransformer"),
+        ("nba_winprob.features.basis", "expand_live_basis"),
+        ("sklearn.utils._encode", "_encode"),
+        ("sklearn.utils._encode", "_unique"),
     }
 
     def find_class(self, module: str, name: str):  # noqa: ANN001
@@ -151,3 +161,83 @@ def _find_local_artifacts(run_id: str) -> tuple[Path, Path] | None:
             if calibrator.is_file():
                 return model_path, calibrator
     return None
+
+
+class LogisticWinProbServer:
+    """Serve a regularized logistic model through the same feature contract.
+
+    The default production server remains ``WinProbServer``. This class is an
+    opt-in shadow/replacement path and supports an optional calibrator, while
+    allowing the validated raw logistic probabilities to be served directly.
+    """
+
+    def __init__(self, model, calibrator=None) -> None:
+        self._model = model
+        self._calibrator = calibrator
+
+    @classmethod
+    def from_model(cls, model, calibrator=None) -> LogisticWinProbServer:
+        return cls(model, calibrator)
+
+    @classmethod
+    def from_paths(
+        cls,
+        model_path: str | Path,
+        calibrator_path: str | Path | None = None,
+    ) -> LogisticWinProbServer:
+        with open(model_path, "rb") as artifact:
+            model = _TrustedArtifactUnpickler(artifact).load()
+        calibrator = (
+            _load_trusted_calibrator(calibrator_path)
+            if calibrator_path is not None
+            else None
+        )
+        return cls(model, calibrator)
+
+    @classmethod
+    def from_mlflow(
+        cls,
+        run_id: str,
+        tracking_uri: str | None = None,
+        calibrator_name: str | None = None,
+    ) -> LogisticWinProbServer:
+        import mlflow
+        import mlflow.sklearn
+
+        if tracking_uri:
+            mlflow.set_tracking_uri(tracking_uri)
+        else:
+            from nba_winprob.config import get_settings
+
+            uri = get_settings().mlflow_tracking_uri
+            if uri:
+                mlflow.set_tracking_uri(uri)
+        model = mlflow.sklearn.load_model(f"runs:/{run_id}/logistic_model")
+        calibrator = None
+        if calibrator_name:
+            client = mlflow.tracking.MlflowClient()
+            path = client.download_artifacts(
+                run_id, f"calibration/{calibrator_name}"
+            )
+            calibrator = _load_trusted_calibrator(path)
+        return cls(model, calibrator)
+
+    def _predict_raw(self, features: list[FeatureVector]):
+        import pandas as pd
+
+        rows = [{col: getattr(f, col) for col in FEATURE_COLS} for f in features]
+        frame = pd.DataFrame(rows).astype(float)
+        return self._model.predict_proba(frame)[:, 1]
+
+    def predict(self, feature: FeatureVector) -> float:
+        return self.predict_batch([feature])[0]
+
+    def predict_batch(self, features: list[FeatureVector]) -> list[float]:
+        import numpy as np
+
+        raw = self._predict_raw(features)
+        probabilities = self._calibrator.predict(raw) if self._calibrator else raw
+        # A blowout with seconds left saturates the linear model to exactly 0 or
+        # 1. Those are almost always right, but one wrong buzzer-beater would
+        # cost infinite log loss downstream, so keep predictions off the bounds.
+        return list(map(float, np.clip(probabilities, PROBABILITY_FLOOR, 1.0 - PROBABILITY_FLOOR)))

@@ -20,6 +20,10 @@ data/
 # ML artifacts
 mlruns/
 models/
+# Derived benchmark tables are regenerable from data/raw; the served model
+# pickle is small and stays tracked so deploys have it.
+artifacts/*.parquet
+mlflow.db
 
 # OS / editor
 .DS_Store

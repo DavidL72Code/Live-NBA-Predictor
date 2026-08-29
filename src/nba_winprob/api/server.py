@@ -295,17 +295,64 @@ def _get_server():
         return _prob_server
     _server_loaded = True
     settings = get_settings()
-    if settings.analyst_mlflow_run_id:
-        from nba_winprob.analyst.serve import WinProbServer
+    use_logistic = settings.analyst_model_type.lower() == "logistic"
+    # A configured local logistic artifact wins over the MLflow run id, which
+    # normally points at the XGBoost stack and has no logistic model to load.
+    if use_logistic and settings.analyst_logistic_model_path:
+        from nba_winprob.analyst.serve import LogisticWinProbServer
 
         try:
-            _prob_server = WinProbServer.from_mlflow(
-                settings.analyst_mlflow_run_id,
-                tracking_uri=settings.mlflow_tracking_uri,
+            _prob_server = LogisticWinProbServer.from_paths(
+                settings.analyst_logistic_model_path,
+                settings.analyst_logistic_calibrator_path,
             )
+            logger.info(
+                "logistic model loaded from %s", settings.analyst_logistic_model_path
+            )
+            return _prob_server
+        except Exception as exc:
+            logger.warning(
+                "could not load logistic model from %s: %s — falling back",
+                settings.analyst_logistic_model_path,
+                exc,
+            )
+    if settings.analyst_mlflow_run_id:
+        from nba_winprob.analyst.serve import LogisticWinProbServer, WinProbServer
+
+        try:
+            if settings.analyst_model_type.lower() == "logistic":
+                _prob_server = LogisticWinProbServer.from_mlflow(
+                    settings.analyst_mlflow_run_id,
+                    tracking_uri=settings.mlflow_tracking_uri,
+                )
+            else:
+                _prob_server = WinProbServer.from_mlflow(
+                    settings.analyst_mlflow_run_id,
+                    tracking_uri=settings.mlflow_tracking_uri,
+                )
             logger.info("model loaded from MLflow run %s", settings.analyst_mlflow_run_id)
         except Exception as exc:
             logger.warning("could not load model: %s — predictions will be unavailable", exc)
+    elif (
+        settings.analyst_model_type.lower() == "logistic"
+        and settings.analyst_logistic_model_path
+    ):
+        from nba_winprob.analyst.serve import LogisticWinProbServer
+
+        try:
+            _prob_server = LogisticWinProbServer.from_paths(
+                settings.analyst_logistic_model_path,
+                settings.analyst_logistic_calibrator_path,
+            )
+            logger.info(
+                "logistic model loaded from %s",
+                settings.analyst_logistic_model_path,
+            )
+        except Exception as exc:
+            logger.warning(
+                "could not load logistic model: %s — predictions will be unavailable",
+                exc,
+            )
     return _prob_server
 
 
@@ -317,6 +364,19 @@ def _predict(feature) -> float | None:
 def _predict_batch(features: list) -> list[float] | None:
     server = _get_server()
     return server.predict_batch(features) if server else None
+
+
+# Displayed probabilities are rounded for the UI, which would otherwise push a
+# clipped 0.999999 back onto the 1.0 bound. Clamp after rounding so no response
+# ever claims a game is decided.
+PROBABILITY_DISPLAY_FLOOR = 1e-4
+
+
+def _round_prob(probability: float) -> float:
+    return min(
+        max(round(probability, 4), PROBABILITY_DISPLAY_FLOOR),
+        1.0 - PROBABILITY_DISPLAY_FLOOR,
+    )
 
 
 # ── UI ──────────────────────────────────────────────────────────────────────
@@ -688,7 +748,7 @@ def _fetch_history(game_id: str, refresh: bool = False) -> dict:
             "sub_type": event.sub_type,
             "shot_result": event.shot_result,
             "shot_value": event.shot_value,
-            "model_prob": round(probs[i], 4) if probs else None,
+            "model_prob": _round_prob(probs[i]) if probs else None,
             "feature_context": _feature_context(fv),
         })
 
@@ -931,7 +991,7 @@ async def game_live(game_id: str):
         "away_score": feature.away_score,
         "score_diff": feature.score_diff,
         "feature_context": _feature_context(feature),
-        "model_prob": round(prob, 4) if prob is not None else None,
+        "model_prob": _round_prob(prob) if prob is not None else None,
     }
 
 
@@ -963,7 +1023,7 @@ async def stream_game(game_id: str):
                         "home_score": feature.home_score,
                         "away_score": feature.away_score,
                         "feature_context": _feature_context(feature),
-                        "model_prob": round(prob, 4) if prob is not None else None,
+                        "model_prob": _round_prob(prob) if prob is not None else None,
                     }
                     yield f"data: {json.dumps(payload)}\n\n"
                 else:
@@ -1142,7 +1202,7 @@ async def predict_at_event(game_id: str, req: PredictAtRequest, refresh: bool = 
         "seconds_remaining": round(feature.seconds_remaining, 1),
         "home_score": feature.home_score,
         "away_score": feature.away_score,
-        "model_prob": round(prob, 4),
+        "model_prob": _round_prob(prob),
         "feature_context": _feature_context(feature),
         "cached": True,
     }

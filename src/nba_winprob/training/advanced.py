@@ -468,6 +468,234 @@ def nested_game_xgb_vs_logistic(
     }
 
 
+def nested_game_margin_benchmark(
+    df: pd.DataFrame,
+    feature_cols: list[str],
+    alpha_grid: tuple[float, ...] = (0.1, 1.0, 10.0, 100.0),
+) -> dict:
+    """Evaluate a regularized remaining-margin Gaussian model without leakage."""
+    from scipy.stats import norm
+    from sklearn.linear_model import Ridge
+    from sklearn.pipeline import make_pipeline
+    from sklearn.preprocessing import StandardScaler
+
+    if "final_margin" not in df.columns:
+        raise ValueError("margin benchmark requires a final_margin evaluation target")
+    labels = []
+    predictions = []
+    game_ids = []
+    folds = []
+    for train_idx, validation_idx, train_end, validation_end in walk_forward_game_folds(df):
+        outer_train = df.iloc[train_idx]
+        outer_validation = df.iloc[validation_idx]
+        inner_folds = walk_forward_game_folds(
+            outer_train,
+            min_train_games=500,
+            validation_games=500,
+            step_games=500,
+        )
+        candidates = []
+        for alpha in alpha_grid:
+            residuals = []
+            losses = []
+            for inner_train_idx, inner_validation_idx, _, _ in inner_folds:
+                inner_train = outer_train.iloc[inner_train_idx]
+                inner_validation = outer_train.iloc[inner_validation_idx]
+                model = make_pipeline(StandardScaler(), Ridge(alpha=alpha))
+                model.fit(
+                    inner_train[feature_cols].astype(float),
+                    inner_train["final_margin"].astype(float),
+                )
+                margin = model.predict(inner_validation[feature_cols].astype(float))
+                residual = inner_validation["final_margin"].to_numpy() - margin
+                residuals.extend(residual.tolist())
+            sigma = max(float(np.std(residuals, ddof=1)), 1.0)
+            # Inner selection uses a probability score derived from held-out residuals.
+            for inner_train_idx, inner_validation_idx, _, _ in inner_folds:
+                inner_train = outer_train.iloc[inner_train_idx]
+                inner_validation = outer_train.iloc[inner_validation_idx]
+                model = make_pipeline(StandardScaler(), Ridge(alpha=alpha))
+                model.fit(
+                    inner_train[feature_cols].astype(float),
+                    inner_train["final_margin"].astype(float),
+                )
+                probability = norm.cdf(
+                    model.predict(inner_validation[feature_cols].astype(float)) / sigma
+                )
+                losses.append(_metrics(inner_validation[TARGET_COL], probability))
+            candidates.append({
+                "alpha": alpha,
+                "sigma": sigma,
+                "log_loss": float(np.mean([loss["log_loss"] for loss in losses])),
+                "brier": float(np.mean([loss["brier"] for loss in losses])),
+            })
+        selected = min(candidates, key=lambda item: (item["log_loss"], item["brier"]))
+        final_model = make_pipeline(StandardScaler(), Ridge(alpha=selected["alpha"]))
+        final_model.fit(
+            outer_train[feature_cols].astype(float),
+            outer_train["final_margin"].astype(float),
+        )
+        probability = norm.cdf(
+            final_model.predict(outer_validation[feature_cols].astype(float))
+            / selected["sigma"]
+        )
+        y = outer_validation[TARGET_COL].astype(int).to_numpy()
+        labels.append(y)
+        predictions.append(probability)
+        game_ids.append(outer_validation["game_id"].to_numpy())
+        folds.append({
+            "train_end": train_end,
+            "validation_end": validation_end,
+            "selected": selected,
+            "metrics": _metrics(y, probability),
+        })
+    y = np.concatenate(labels)
+    p = np.concatenate(predictions)
+    return {
+        "metrics": _metrics(y, p),
+        "outer_folds": folds,
+        "game_bootstrap_95": _game_bootstrap_intervals(
+            np.concatenate(game_ids), y, {"margin": p}
+        ),
+        "oof_rows": int(len(y)),
+    }
+
+
+def nested_game_dynamic_distribution_benchmark(
+    df: pd.DataFrame,
+    feature_cols: list[str] | None = None,
+    alpha: float = 10.0,
+) -> dict:
+    """Model the remaining score margin with time-bucketed uncertainty.
+
+    The final margin is an evaluation target only. Inputs are current-event
+    state and pregame features, and all fitting is repeated inside rolling
+    game-time folds.  The time-bucketed residual scale gives the Gaussian
+    conversion a simple heteroscedastic score-state model.
+    """
+    from scipy.stats import norm
+    from sklearn.linear_model import Ridge
+    from sklearn.pipeline import make_pipeline
+    from sklearn.preprocessing import StandardScaler
+
+    if {"final_margin", "score_diff"} - set(df.columns):
+        raise ValueError("dynamic distribution benchmark requires final_margin and score_diff")
+    feature_cols = feature_cols or FEATURE_COLS
+    work = df.copy()
+    work["remaining_margin"] = work["final_margin"] - work["score_diff"]
+    labels = []
+    predictions = []
+    game_ids = []
+    folds = []
+    for train_idx, validation_idx, train_end, validation_end in walk_forward_game_folds(work):
+        train_df = work.iloc[train_idx]
+        validation_df = work.iloc[validation_idx]
+        model = make_pipeline(StandardScaler(), Ridge(alpha=alpha))
+        model.fit(
+            train_df[feature_cols].astype(float),
+            train_df["remaining_margin"].astype(float),
+        )
+        train_residual = train_df["remaining_margin"].to_numpy() - model.predict(
+            train_df[feature_cols].astype(float)
+        )
+        scales = []
+        train_time = train_df["seconds_remaining"].to_numpy()
+        for lower, upper in ((60.0, 300.0), (300.0, 720.0), (720.0, np.inf)):
+            residual = train_residual[(train_time > lower) & (train_time <= upper)]
+            scales.append(max(float(np.std(residual, ddof=1)), 1.0))
+        validation_time = validation_df["seconds_remaining"].to_numpy()
+        sigma = np.where(
+            validation_time <= 300.0,
+            scales[0],
+            np.where(validation_time <= 720.0, scales[1], scales[2]),
+        )
+        predicted_margin = validation_df["score_diff"].to_numpy() + model.predict(
+            validation_df[feature_cols].astype(float)
+        )
+        probability = norm.cdf(predicted_margin / sigma)
+        y = validation_df[TARGET_COL].astype(int).to_numpy()
+        labels.append(y)
+        predictions.append(probability)
+        game_ids.append(validation_df["game_id"].to_numpy())
+        folds.append({
+            "train_end": train_end,
+            "validation_end": validation_end,
+            "sigma": scales,
+            "metrics": _metrics(y, probability),
+        })
+    y = np.concatenate(labels)
+    p = np.concatenate(predictions)
+    return {
+        "metrics": _metrics(y, p),
+        "outer_folds": folds,
+        "game_bootstrap_95": _game_bootstrap_intervals(
+            np.concatenate(game_ids), y, {"dynamic_distribution": p}
+        ),
+        "oof_rows": int(len(y)),
+    }
+
+
+def nested_game_horizon_logistic_benchmark(
+    df: pd.DataFrame,
+    feature_cols: list[str] | None = None,
+    horizon_edges: tuple[float, ...] = (60.0, 300.0, 720.0, 2881.0),
+    c_value: float = 1.0,
+) -> dict:
+    """Fit separate historical logistic models for distinct clock horizons."""
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.pipeline import make_pipeline
+    from sklearn.preprocessing import StandardScaler
+
+    feature_cols = feature_cols or FEATURE_COLS
+    labels = []
+    predictions = []
+    game_ids = []
+    folds = []
+    for train_idx, validation_idx, train_end, validation_end in walk_forward_game_folds(df):
+        train_df = df.iloc[train_idx]
+        validation_df = df.iloc[validation_idx]
+        probability = np.full(len(validation_df), 0.5, dtype=float)
+        for lower, upper in zip(horizon_edges[:-1], horizon_edges[1:], strict=True):
+            train_mask = (
+                (train_df["seconds_remaining"] > lower)
+                & (train_df["seconds_remaining"] <= upper)
+            )
+            validation_mask = (
+                (validation_df["seconds_remaining"] > lower)
+                & (validation_df["seconds_remaining"] <= upper)
+            )
+            model = make_pipeline(
+                StandardScaler(),
+                LogisticRegression(C=c_value, max_iter=1000),
+            )
+            model.fit(
+                train_df.loc[train_mask, feature_cols].astype(float),
+                train_df.loc[train_mask, TARGET_COL].astype(int),
+            )
+            probability[validation_mask.to_numpy()] = model.predict_proba(
+                validation_df.loc[validation_mask, feature_cols].astype(float)
+            )[:, 1]
+        y = validation_df[TARGET_COL].astype(int).to_numpy()
+        labels.append(y)
+        predictions.append(probability)
+        game_ids.append(validation_df["game_id"].to_numpy())
+        folds.append({
+            "train_end": train_end,
+            "validation_end": validation_end,
+            "metrics": _metrics(y, probability),
+        })
+    y = np.concatenate(labels)
+    p = np.concatenate(predictions)
+    return {
+        "metrics": _metrics(y, p),
+        "outer_folds": folds,
+        "game_bootstrap_95": _game_bootstrap_intervals(
+            np.concatenate(game_ids), y, {"horizon_logistic": p}
+        ),
+        "oof_rows": int(len(y)),
+    }
+
+
 def _xgb_params(overrides: dict | None = None, n_estimators: int = 200, n_jobs: int = 2) -> dict:
     params = {
         "n_estimators": n_estimators,
@@ -1215,10 +1443,20 @@ class MarginDistributionModel:
 
 
 def _final_margin(df: pd.DataFrame) -> pd.Series:
-    if {"home_score", "away_score"} - set(df.columns):
-        raise ValueError("margin model requires home_score and away_score columns")
-    ordered = df.sort_values(["game_id", "event_num"])
-    margins = (ordered["home_score"] - ordered["away_score"]).groupby(ordered["game_id"]).last()
+    required = {"home_score", "away_score", "period", "seconds_remaining"}
+    if required - set(df.columns):
+        raise ValueError(
+            "margin model requires home_score, away_score, period, and seconds_remaining"
+        )
+    max_period = df.groupby("game_id")["period"].transform("max")
+    final_period = df.loc[df["period"] == max_period].copy()
+    final_period = final_period.sort_values(
+        ["game_id", "seconds_remaining", "event_num"],
+        ascending=[True, True, False],
+    ).drop_duplicates("game_id", keep="first")
+    margins = (final_period["home_score"] - final_period["away_score"]).set_axis(
+        final_period["game_id"]
+    )
     return df["game_id"].map(margins).astype(float)
 
 

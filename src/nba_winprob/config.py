@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     gemini_api_key: str | None = None
     analyst_model: str = "gemini-3.1-flash-lite"
     analyst_mlflow_run_id: str | None = None
+    analyst_model_type: str = "xgboost"
+    analyst_logistic_model_path: Path | None = None
+    analyst_logistic_calibrator_path: Path | None = None
 
     # Web deployment
     # Comma-separated browser origins allowed to call the backend API.

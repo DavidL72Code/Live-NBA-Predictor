@@ -1,0 +1,34 @@
+{
+  "production_xgb_isotonic": {
+    "brier": 0.17090322275749315,
+    "log_loss": 0.5081651455982856,
+    "roc_auc": 0.8197832126257836
+  },
+  "xgb_early_stopped": {
+    "brier": 0.15684601941497214,
+    "log_loss": 0.4668047935773139,
+    "roc_auc": 0.8497597565507644,
+    "paired_brier_delta_vs_production_95": [
+      -0.016835181643316478,
+      -0.01137057815837296
+    ]
+  },
+  "logistic_basis_nested_c": {
+    "brier": 0.15329535988262316,
+    "log_loss": 0.45678275003157187,
+    "roc_auc": 0.8564177983607979,
+    "paired_brier_delta_vs_production_95": [
+      -0.021061964420852473,
+      -0.014039706913045754
+    ]
+  },
+  "selected_c_per_fold": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+  ],
+  "oof_rows": 75000
+}
