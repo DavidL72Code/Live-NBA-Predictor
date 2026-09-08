@@ -20,14 +20,14 @@ def _raw(event_num, period, clock_seconds, home, away, game_id="g1"):
 
 
 class TestProcessMessage:
-    def test_returns_key_and_value_bytes(self):
+    def test_returns_key_value_and_feature(self):
         states = {}
         result = process_message(_raw(1, 1, 720, 0, 0), states)
         assert result is not None
-        key, value = result
+        key, value, feature = result
         assert key == b"g1"
-        vec = deserialize_feature(value)
-        assert isinstance(vec, FeatureVector)
+        assert isinstance(feature, FeatureVector)
+        assert deserialize_feature(value) == feature
 
     def test_creates_game_state_on_first_event(self):
         states = {}
@@ -38,7 +38,7 @@ class TestProcessMessage:
     def test_reuses_state_across_events(self):
         states = {}
         process_message(_raw(1, 1, 600, 3, 0), states)
-        _, v2 = process_message(_raw(2, 1, 540, 3, 2), states)
+        _, v2, _ = process_message(_raw(2, 1, 540, 3, 2), states)
         vec = deserialize_feature(v2)
         # run_away should reflect both events being in the window
         assert vec.run_away == 2
@@ -49,7 +49,7 @@ class TestProcessMessage:
         process_message(_raw(1, 1, 600, 3, 0, game_id="g2"), states)
         assert "g1" in states and "g2" in states
         # Sanity: g1 and g2 don't bleed into each other
-        _, raw_g1 = process_message(_raw(2, 1, 540, 10, 7, game_id="g1"), states)
+        _, raw_g1, _ = process_message(_raw(2, 1, 540, 10, 7, game_id="g1"), states)
         vec_g1 = deserialize_feature(raw_g1)
         assert vec_g1.away_score == 7
 
@@ -67,7 +67,7 @@ class TestProcessMessage:
         expected = direct_state.update(event)
 
         states = {}
-        _, value = process_message(serialize_event(event)[1], states)
+        _, value, _ = process_message(serialize_event(event)[1], states)
         got = deserialize_feature(value)
         assert got == expected
 
@@ -89,7 +89,7 @@ class TestProcessMessage:
         states = {}
         streaming_vectors = []
         for event in events:
-            _, value = process_message(serialize_event(event)[1], states)
+            _, value, _ = process_message(serialize_event(event)[1], states)
             streaming_vectors.append(deserialize_feature(value))
 
         assert streaming_vectors == batch_vectors
