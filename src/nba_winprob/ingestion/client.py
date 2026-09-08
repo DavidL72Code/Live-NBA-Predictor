@@ -72,6 +72,7 @@ class NBAStatsClient:
         self.max_retries = max_retries
         self.timeout = timeout
         self._last_request_at = 0.0
+        self._game_log_cache: dict[tuple[str, str], dict] = {}
 
     def _throttle(self) -> None:
         wait = self.min_request_interval - (time.monotonic() - self._last_request_at)
@@ -102,14 +103,18 @@ class NBAStatsClient:
             f"{description} failed after {self.max_retries} attempts"
         ) from last_error
 
-    def get_league_game_log(
-        self, season: str, season_type: str = "Regular Season"
-    ) -> list[dict]:
-        """All team-game rows for a season with the fields needed to build team context.
+    def _league_game_log(self, season: str, season_type: str) -> dict:
+        """Fetch a season's game log once and reuse it.
 
-        Returns one dict per team-game (two rows per game: home team and away team) with
-        keys: GAME_ID, GAME_DATE, TEAM_ID, MATCHUP, WL, PLUS_MINUS.
+        A backfill needs this payload twice — once for the game IDs and once for
+        team context — so the result is memoized per client to avoid a second
+        identical request.
         """
+        key = (season, season_type)
+        cached = self._game_log_cache.get(key)
+        if cached is not None:
+            return cached
+
         from nba_api.stats.endpoints import leaguegamelog
 
         def make_request():
@@ -121,6 +126,18 @@ class NBAStatsClient:
 
         payload = self._call(f"LeagueGameLog({season}, {season_type})", make_request)
         result_set = payload["resultSets"][0]
+        self._game_log_cache[key] = result_set
+        return result_set
+
+    def get_league_game_log(
+        self, season: str, season_type: str = "Regular Season"
+    ) -> list[dict]:
+        """All team-game rows for a season with the fields needed to build team context.
+
+        Returns one dict per team-game (two rows per game: home team and away team) with
+        keys: GAME_ID, GAME_DATE, TEAM_ID, MATCHUP, WL, PLUS_MINUS.
+        """
+        result_set = self._league_game_log(season, season_type)
         headers = result_set["headers"]
 
         wanted = {"GAME_ID", "GAME_DATE", "TEAM_ID", "MATCHUP", "WL", "PLUS_MINUS"}
@@ -139,19 +156,8 @@ class NBAStatsClient:
         LeagueGameLog lists each game once per team; duplicates are removed
         preserving first appearance.
         """
-        from nba_api.stats.endpoints import leaguegamelog
-
-        def make_request():
-            return leaguegamelog.LeagueGameLog(
-                season=season,
-                season_type_all_star=season_type,
-                timeout=self.timeout,
-            ).get_dict()
-
-        payload = self._call(f"LeagueGameLog({season}, {season_type})", make_request)
-        result_set = payload["resultSets"][0]
-        headers = result_set["headers"]
-        game_id_idx = headers.index("GAME_ID")
+        result_set = self._league_game_log(season, season_type)
+        game_id_idx = result_set["headers"].index("GAME_ID")
         seen: dict[str, None] = {}
         for row in result_set["rowSet"]:
             seen.setdefault(str(row[game_id_idx]), None)

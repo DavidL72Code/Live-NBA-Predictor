@@ -223,40 +223,28 @@ async def _cached_analyst(key: str, factory, ttl: float = _ANALYST_CACHE_TTL) ->
                     _ANALYST_TASKS.pop(key, None)
 
 
-def _check_ai_rate_limit(request: Request) -> None:
+def _enforce_limits(request: Request, per_client, global_limiter, label: str) -> None:
+    """Apply the per-client budget then the shared one, 429ing on either."""
     client_host = request.client.host if request.client else "unknown"
-    allowed, retry_after = _AI_PER_CLIENT_LIMITER.check(client_host)
-    if not allowed:
-        raise HTTPException(
-            status_code=429,
-            detail="AI request limit reached for this client. Try again shortly.",
-            headers={"Retry-After": str(retry_after)},
-        )
-    allowed, retry_after = _AI_GLOBAL_LIMITER.check("all-clients")
-    if not allowed:
-        raise HTTPException(
-            status_code=429,
-            detail="AI request capacity is temporarily exhausted. Try again shortly.",
-            headers={"Retry-After": str(retry_after)},
-        )
+    for limiter, key, detail in (
+        (per_client, client_host, f"{label} limit reached for this client."),
+        (global_limiter, "all-clients", f"{label} capacity is temporarily exhausted."),
+    ):
+        allowed, retry_after = limiter.check(key)
+        if not allowed:
+            raise HTTPException(
+                status_code=429,
+                detail=f"{detail} Try again shortly.",
+                headers={"Retry-After": str(retry_after)},
+            )
+
+
+def _check_ai_rate_limit(request: Request) -> None:
+    _enforce_limits(request, _AI_PER_CLIENT_LIMITER, _AI_GLOBAL_LIMITER, "AI request")
 
 
 def _check_public_rate_limit(request: Request) -> None:
-    client_host = request.client.host if request.client else "unknown"
-    allowed, retry_after = _PUBLIC_PER_CLIENT_LIMITER.check(client_host)
-    if not allowed:
-        raise HTTPException(
-            status_code=429,
-            detail="Request limit reached for this client. Try again shortly.",
-            headers={"Retry-After": str(retry_after)},
-        )
-    allowed, retry_after = _PUBLIC_GLOBAL_LIMITER.check("all-clients")
-    if not allowed:
-        raise HTTPException(
-            status_code=429,
-            detail="Request capacity is temporarily exhausted. Try again shortly.",
-            headers={"Retry-After": str(retry_after)},
-        )
+    _enforce_limits(request, _PUBLIC_PER_CLIENT_LIMITER, _PUBLIC_GLOBAL_LIMITER, "Request")
 
 
 @lru_cache(maxsize=4)
@@ -356,6 +344,41 @@ def _get_server():
     return _prob_server
 
 
+@app.on_event("startup")
+async def _warm_model() -> None:
+    """Load the model and run one throwaway prediction at boot.
+
+    Unpickling plus the first scikit-learn call costs seconds; without this the
+    first visitor after a restart pays it, which on a sleeping free-tier host is
+    every visitor.
+    """
+
+    def warm() -> str | None:
+        server = _get_server()
+        if server is None:
+            return None
+        from nba_winprob.schemas import FeatureVector
+        from nba_winprob.training.train import FEATURE_COLS
+
+        blank = dict.fromkeys(FEATURE_COLS, 0.0)
+        blank.update(seconds_remaining=2880.0, home_elo_rating=1500.0, away_elo_rating=1500.0)
+        server.predict(FeatureVector(
+            game_id="0000000000", event_num=0, period=1,
+            home_score=0, away_score=0, **blank,
+        ))
+        return type(server).__name__
+
+    try:
+        name = await asyncio.to_thread(warm)
+    except Exception as exc:
+        logger.warning("model pre-warm failed: %s", exc)
+        return
+    if name:
+        logger.info("model pre-warmed (%s)", name)
+    else:
+        logger.info("no model configured to pre-warm")
+
+
 def _predict(feature) -> float | None:
     server = _get_server()
     return server.predict(feature) if server else None
@@ -382,19 +405,21 @@ def _round_prob(probability: float) -> float:
 # ── UI ──────────────────────────────────────────────────────────────────────
 
 
+def _read_page(path: Path, label: str) -> str:
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"{label} not found")
+    return path.read_text(encoding="utf-8")
+
+
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 @app.get("/index.html", response_class=HTMLResponse, include_in_schema=False)
 async def ui():
-    if not _UI_FILE.exists():
-        raise HTTPException(status_code=404, detail="UI file not found")
-    return _UI_FILE.read_text(encoding="utf-8")
+    return _read_page(_UI_FILE, "UI file")
 
 
 @app.get("/rd.html", response_class=HTMLResponse, include_in_schema=False)
 async def research_development():
-    if not _RD_FILE.exists():
-        raise HTTPException(status_code=404, detail="R&D page not found")
-    return _RD_FILE.read_text(encoding="utf-8")
+    return _read_page(_RD_FILE, "R&D page")
 
 
 @app.get("/config.js", include_in_schema=False)
