@@ -226,15 +226,17 @@ async def _cached_analyst(key: str, factory, ttl: float = _ANALYST_CACHE_TTL) ->
 def _enforce_limits(request: Request, per_client, global_limiter, label: str) -> None:
     """Apply the per-client budget then the shared one, 429ing on either."""
     client_host = request.client.host if request.client else "unknown"
-    for limiter, key, detail in (
-        (per_client, client_host, f"{label} limit reached for this client."),
-        (global_limiter, "all-clients", f"{label} capacity is temporarily exhausted."),
+    # The message is built only on rejection: this runs on every request, and
+    # formatting two strings per call to discard them is pure overhead.
+    for limiter, key, reason in (
+        (per_client, client_host, "limit reached for this client"),
+        (global_limiter, "all-clients", "capacity is temporarily exhausted"),
     ):
         allowed, retry_after = limiter.check(key)
         if not allowed:
             raise HTTPException(
                 status_code=429,
-                detail=f"{detail} Try again shortly.",
+                detail=f"{label} {reason}. Try again shortly.",
                 headers={"Retry-After": str(retry_after)},
             )
 
