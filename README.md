@@ -4,7 +4,7 @@ A production-style streaming ML system that predicts live NBA win probability,
 updating possession-by-possession. The point of the project is the
 infrastructure around the model — streaming features, a feature store with
 consistent online/offline paths, calibration monitoring, and CI/CD with
-replay-based validation. Full design: [nba-win-probability-plan.md](nba-win-probability-plan.md).
+replay-based validation. Full design: [research/notes/nba-win-probability-plan.md](research/notes/nba-win-probability-plan.md).
 
 ## Status
 
@@ -125,10 +125,10 @@ bubble and limited-crowd games that the venue and Elo features would learn from.
 ### Reproducing
 
 ```bash
-.venv/bin/python scripts/validate_five_season.py      # the comparison table
-.venv/bin/python scripts/benchmark_learning_curve.py  # the learning curve
-.venv/bin/python scripts/benchmark_extra_features.py  # box-score feature test
-.venv/bin/python scripts/benchmark_forest_gbm.py      # forest / gradient boosting
+.venv/bin/python research/scripts/validate_five_season.py      # the comparison table
+.venv/bin/python research/scripts/benchmark_learning_curve.py  # the learning curve
+.venv/bin/python research/scripts/benchmark_extra_features.py  # box-score feature test
+.venv/bin/python research/scripts/benchmark_forest_gbm.py      # forest / gradient boosting
 ```
 
 Results land in `artifacts/live_*.json`. A known caveat: an earlier feature

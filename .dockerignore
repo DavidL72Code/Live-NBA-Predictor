@@ -1,0 +1,43 @@
+# The image runs one thing: `nba-winprob serve`. Everything it needs is src/,
+# the served model pickle, and the packaging files. Dockerfile does COPY . .,
+# so anything not excluded here is shipped — this file was previously omitting
+# ~1.7GB of raw data, MLflow runs and benchmark artifacts from a service that
+# reads none of them.
+
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+.venv
+.git
+.claude
+.impeccable
+
+# Caches and build output
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+dist
+node_modules
+.vercel
+
+# Training data and experiment tracking — not read at serve time
+data
+mlruns
+mlflow.db
+
+# Research: benchmarks, notes, and the analysis scripts behind them
+research
+tests
+abstract-metrics
+hf_nba_probe
+
+# Benchmark tables and results. The served model pickle is kept.
+artifacts/*.parquet
+artifacts/*.json
+artifacts/*.bak
+artifacts/*.4season.bak
+
+# macOS noise
+.DS_Store
