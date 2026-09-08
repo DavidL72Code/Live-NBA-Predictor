@@ -203,7 +203,16 @@ def build_context(
 
     if include_player_stats:
         try:
-            boxscore = client.get_boxscore(game_id)
+            # ESPN-sourced games carry an "espn:" id that NBA Stats cannot
+            # resolve, so asking it costs the full retry budget — three attempts
+            # with exponential backoff, ~29s — to arrive at a guaranteed failure.
+            # The scoreboard serves ESPN ids, so that was every prediction.
+            if game_id.startswith("espn:"):
+                from nba_winprob.providers.espn import fetch_players
+
+                boxscore = fetch_players(game_id)
+            else:
+                boxscore = client.get_boxscore(game_id)
             home_team = _resolve_team(boxscore.get("home_team")) or home_team
             away_team = _resolve_team(boxscore.get("away_team")) or away_team
             for p in boxscore.get("players", []):
