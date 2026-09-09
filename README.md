@@ -8,21 +8,55 @@ replay-based validation. Full design: [research/notes/nba-win-probability-plan.m
 
 ## Status
 
-**Phase 1 (historical data & backfill)** — in progress. The base currently includes:
+Deployed. A FastAPI backend on Render serves the model and the LLM analyst; a
+static frontend on Vercel calls it and proxies NBA Stats requests, which the
+backend's cloud IP cannot make directly.
 
 - `nba_winprob.schemas` — canonical `GameEvent` / `FeatureVector` models
 - `nba_winprob.gametime` — game clock math (elapsed/remaining, OT handling)
 - `nba_winprob.features` — `GameState` incremental accumulator; the *same*
   class serves the streaming path and the offline batch path, which is what
-  guarantees training-serving consistency
+  guarantees training-serving consistency. `features/basis.py` builds the
+  model's derived inputs.
 - `nba_winprob.ingestion` — rate-limited `nba_api` client, PlayByPlayV3
   normalizer with schema-drift detection, resume-safe season backfill.
   (V3, not V2: while building this we found the V2 endpoint now returns
   empty payloads — exactly the endpoint-drift risk the plan calls out.)
-- `nba_winprob.cli` — `backfill` and `build-features` commands
+- `nba_winprob.providers.espn` — fallback play-by-play and rosters, used when
+  NBA Stats is unavailable from cloud egress
+- `nba_winprob.analyst` — model serving plus the Gemini analyst
+- `nba_winprob.api` — FastAPI app and the web UI
+- `nba_winprob.cli` — `backfill`, `build-features`, `train`, `serve`
 
-Later phases (event bus, stream processor, Redis/Postgres feature store,
-FastAPI serving, React dashboard, monitoring) build on this base — see the plan.
+The Kafka/Redis streaming path (`nba_winprob.streaming`) runs under
+`docker-compose` for local development and is not part of the deployment.
+
+## Repository layout
+
+Two kinds of code, kept apart so it is clear what runs in production:
+
+```
+src/nba_winprob/        Runtime. Everything the deployed service imports.
+  research/             Model comparisons kept for reproducibility; nothing
+                        on a serving path imports them.
+  streaming/            Local-dev Kafka pipeline, not deployed.
+research/
+  scripts/              Benchmark and validation scripts behind artifacts/
+  notes/                Design plan and analysis writeups
+scripts/                Build tooling only (vercel.json invokes it by path)
+artifacts/              live_logistic_model.pkl is served; the JSON and
+                        parquet files are research output
+data/, mlruns/          Training corpus and experiment tracking, local only
+```
+
+`.dockerignore` mirrors this split. The image ships `src/`, the model pickle
+and the packaging files — about 0.5 MB. Before that split it shipped the whole
+repository, 1.7 GB, to a service that reads none of it.
+
+**One trap.** `features/basis.py` looks unreachable to static analysis; nothing
+imports it. The served pickle names `nba_winprob.features.basis.expand_live_basis`
+as its first pipeline step, so deleting it breaks serving at load time while
+every test still passes.
 
 ## Model
 
