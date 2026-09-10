@@ -502,6 +502,8 @@ async def get_team_games(team_code: str, season: str | None = Query(default=None
 def _fetch_team_schedule(team_code: str, season: str) -> list[dict]:
     import requests
 
+    from nba_winprob.providers.espn import normalize_tricode
+
     # NBA Stats' scheduleleaguev2 payload is frequently empty/malformed from
     # cloud hosts. ESPN's team-schedule endpoint currently ignores its season
     # query parameter, so build the requested season from monthly scoreboards.
@@ -540,7 +542,7 @@ def _fetch_team_schedule(team_code: str, season: str) -> list[dict]:
         for event in month_payload.get("events", []):
             competitors = (event.get("competitions") or [{}])[0].get("competitors") or []
             if any(
-                (item.get("team") or {}).get("abbreviation") == team_code
+                normalize_tricode((item.get("team") or {}).get("abbreviation")) == team_code
                 for item in competitors
             ):
                 events_by_id[str(event.get("id"))] = event
@@ -555,8 +557,8 @@ def _fetch_team_schedule(team_code: str, season: str) -> list[dict]:
         away = next((item for item in competitors if item.get("homeAway") == "away"), {})
         home_team = home.get("team") or {}
         away_team = away.get("team") or {}
-        home_code = str(home_team.get("abbreviation") or "")
-        away_code = str(away_team.get("abbreviation") or "")
+        home_code = normalize_tricode(home_team.get("abbreviation"))
+        away_code = normalize_tricode(away_team.get("abbreviation"))
         if team_code not in {home_code, away_code}:
             continue
 

@@ -16,6 +16,25 @@ _SUMMARY_PATH = "/apis/site/v2/sports/basketball/nba/summary"
 _SUMMARY_HOSTS = ("site.web.api.espn.com", "site.api.espn.com")
 _CLOCK_RE = re.compile(r"^(\d+):(\d+(?:\.\d+)?)$")
 
+# ESPN publishes six tricodes that differ from the NBA Stats codes the rest of
+# the app keys on (team filters, logo IDs, roster lookups). Left unmapped, these
+# six teams silently fall out of every ESPN-sourced comparison.
+_ESPN_TRICODES = {
+    "GS": "GSW",
+    "NO": "NOP",
+    "NY": "NYK",
+    "SA": "SAS",
+    "UTAH": "UTA",
+    "WSH": "WAS",
+}
+
+
+def normalize_tricode(abbreviation: str | None) -> str:
+    """Map an ESPN team abbreviation onto its NBA Stats tricode."""
+    code = str(abbreviation or "").strip().upper()
+    return _ESPN_TRICODES.get(code, code)
+
+
 
 def _clock_seconds(value: str) -> float:
     match = _CLOCK_RE.match(str(value or "12:00").strip())
@@ -93,7 +112,7 @@ def normalize_summary(event_id: str, payload: dict | None = None) -> list[GameEv
     competition = (payload.get("header", {}).get("competitions") or [{}])[0]
     competitors = competition.get("competitors") or []
     team_tricode = {
-        str(team.get("id")): str(team.get("team", {}).get("abbreviation") or "")
+        str(team.get("id")): normalize_tricode(team.get("team", {}).get("abbreviation"))
         for team in competitors
     }
     events: list[GameEvent] = []
@@ -137,7 +156,7 @@ def fetch_players(game_id: str) -> dict:
     teams = {
         str(team.get("id")): {
             "side": "home" if team.get("homeAway") == "home" else "away",
-            "name": team.get("team", {}).get("abbreviation") or "",
+            "name": normalize_tricode(team.get("team", {}).get("abbreviation")),
         }
         for team in competitors
     }
