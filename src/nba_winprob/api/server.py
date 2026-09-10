@@ -407,13 +407,16 @@ def _round_prob(probability: float) -> float:
 # ── Health ──────────────────────────────────────────────────────────────────
 
 
-@app.get("/healthz", include_in_schema=False)
+@app.api_route("/healthz", methods=["GET", "HEAD"], include_in_schema=False)
 async def healthz():
     """Liveness probe for uptime monitors.
 
     Deliberately cheap: no upstream calls, no disk reads, no rate limiting, so
     a monitor pinging it every few minutes to keep the host warm costs nothing
     and never eats into the public request budget.
+
+    HEAD is answered as well as GET: uptime monitors default to HEAD, and
+    FastAPI's ``@app.get`` does not register it, which reads as a 405 outage.
     """
     return {"status": "ok"}
 
