@@ -404,6 +404,20 @@ def _round_prob(probability: float) -> float:
     )
 
 
+# ── Health ──────────────────────────────────────────────────────────────────
+
+
+@app.get("/healthz", include_in_schema=False)
+async def healthz():
+    """Liveness probe for uptime monitors.
+
+    Deliberately cheap: no upstream calls, no disk reads, no rate limiting, so
+    a monitor pinging it every few minutes to keep the host warm costs nothing
+    and never eats into the public request budget.
+    """
+    return {"status": "ok"}
+
+
 # ── UI ──────────────────────────────────────────────────────────────────────
 
 
