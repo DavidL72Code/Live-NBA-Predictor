@@ -1384,7 +1384,20 @@ function playerCardHTML(player, teamAbbr, index) {
     </article>`;
 }
 
+function _historyMessage(msg) {
+  // Upstream diagnostics ("response did not contain a plays list") are not for
+  // viewers; a game that has not started is the usual cause.
+  const raw = String(msg || '');
+  if (/plays list|no plays|not contain/i.test(raw)) {
+    return state.selectedGame?.status === 'Scheduled'
+      ? "This game hasn't tipped off yet — plays appear once it starts"
+      : 'Play-by-play is not available for this game yet';
+  }
+  return raw;
+}
+
 function _showHistoryError(gameId, msg) {
+  msg = _historyMessage(msg);
   const svg = document.getElementById('prob-chart');
   if (svg) {
     svg.innerHTML = '';
@@ -1546,9 +1559,14 @@ function probBarHTML(game, liveProb, events = []) {
         </div>`;
     }
     if (game.status === 'Final') return '';
+    // A game with no probability yet is almost always one that has not tipped
+    // off, not a broken model, and an env var name means nothing to a viewer.
+    const reason = game.status === 'Scheduled'
+      ? 'Win probability begins at tip-off'
+      : 'Win probability is not available yet';
     return `
       <div class="prob-section">
-        <div class="prob-no-model">Model not loaded — set <code>NBA_WINPROB_ANALYST_MLFLOW_RUN_ID</code></div>
+        <div class="prob-no-model">${escapeHTML(reason)}</div>
       </div>`;
   }
   const homePct = Math.round(prob * 100);
