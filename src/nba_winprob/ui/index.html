@@ -1252,7 +1252,13 @@ function fetchGameHistory(gameId, refresh = false) {
       if (!refresh) delete state.historyRequests[gameId];
       throw err;
     });
-  if (!refresh) state.historyRequests[gameId] = request;
+  if (!refresh) {
+    state.historyRequests[gameId] = request;
+    // The cached copy may outlive every caller that attached a handler (a
+    // pre-tip game has no plays, so this rejects); without this the browser
+    // logs an unhandled rejection. Callers still see their own rejection.
+    request.catch(() => {});
+  }
   return request;
 }
 
@@ -1267,7 +1273,13 @@ function fetchGamePlayers(gameId, refresh = false) {
       if (!refresh) delete state.playerRequests[gameId];
       throw err;
     });
-  if (!refresh) state.playerRequests[gameId] = request;
+  if (!refresh) {
+    state.playerRequests[gameId] = request;
+    // The cached copy may outlive every caller that attached a handler (a
+    // pre-tip game has no plays, so this rejects); without this the browser
+    // logs an unhandled rejection. Callers still see their own rejection.
+    request.catch(() => {});
+  }
   return request;
 }
 
