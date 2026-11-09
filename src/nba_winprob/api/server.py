@@ -508,8 +508,7 @@ def _fetch_team_schedule(team_code: str, season: str) -> list[dict]:
     from nba_winprob.providers.espn import normalize_tricode
 
     # NBA Stats' scheduleleaguev2 payload is frequently empty/malformed from
-    # cloud hosts. ESPN's team-schedule endpoint currently ignores its season
-    # query parameter, so build the requested season from monthly scoreboards.
+    # cloud hosts, so build the requested season from ESPN monthly scoreboards.
     season_match = re.fullmatch(r"(\d{4})-(\d{2})", season)
     if not season_match:
         raise ValueError(f"invalid NBA season: {season}")
@@ -521,10 +520,9 @@ def _fetch_team_schedule(team_code: str, season: str) -> list[dict]:
     last_error = ""
     events_by_id = {}
     for year, month in month_specs:
-        month_days = (31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)[month - 1]
-        if month == 2 and (year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)):
-            month_days = 29
-        date_range = f"{year:04d}{month:02d}01-{year:04d}{month:02d}{month_days:02d}"
+        # ESPN dropped the YYYYMMDD-YYYYMMDD range form (it now 400s on every
+        # range); the YYYYMM month form returns the same events.
+        date_range = f"{year:04d}{month:02d}"
         month_payload = None
         for hostname in ("site.web.api.espn.com", "site.api.espn.com"):
             try:
