@@ -1,6 +1,18 @@
 // Same-schema NBA Stats proxy for the Render backend.
 // The proxy preserves NBA game IDs and response bodies; it only changes the
 // network path so Render does not call stats.nba.com directly.
+// ESPN abbreviates six teams differently from NBA Stats. This proxy emits
+// NBA-shaped payloads, so the codes must be NBA tricodes: the backend's team
+// filters and the UI's logo lookup are both keyed on them.
+const ESPN_TRICODES = {
+  GS: 'GSW', NO: 'NOP', NY: 'NYK', SA: 'SAS', UTAH: 'UTA', WSH: 'WAS',
+};
+
+function normalizeTricode(abbreviation) {
+  const code = String(abbreviation || '').trim().toUpperCase();
+  return ESPN_TRICODES[code] || code;
+}
+
 module.exports = async function handler(req, res) {
   const requestUrl = new URL(req.url, `https://${req.headers.host || 'localhost'}`);
   const marker = '/api/nba/stats/';
@@ -84,12 +96,12 @@ module.exports = async function handler(req, res) {
           gameLabel: event.name || '',
           gameSubtype: gameType === 'playoffs' ? 'Playoffs' : '',
           homeTeam: {
-            teamTricode: home.team?.abbreviation || '',
+            teamTricode: normalizeTricode(home.team?.abbreviation),
             teamName: home.team?.shortDisplayName || home.team?.displayName || '',
             score: home.score || '0',
           },
           awayTeam: {
-            teamTricode: away.team?.abbreviation || '',
+            teamTricode: normalizeTricode(away.team?.abbreviation),
             teamName: away.team?.shortDisplayName || away.team?.displayName || '',
             score: away.score || '0',
           },

@@ -611,6 +611,8 @@ def _fetch_team_schedule(team_code: str, season: str) -> list[dict]:
 
 
 def _fetch_scoreboard(target_date: str) -> list[dict]:
+    from nba_winprob.providers.espn import normalize_tricode
+
     settings = get_settings()
     proxy = (settings.stats_proxy_url or "").strip().rstrip("/")
     if proxy:
@@ -688,10 +690,10 @@ def _fetch_scoreboard(target_date: str) -> list[dict]:
             "status_text": status_text,
             "period": int(game.get("period") or 0),
             "clock": clock_text(game.get("gameClock")),
-            "home_team": str(home.get("teamTricode") or ""),
+            "home_team": normalize_tricode(home.get("teamTricode")),
             "home_team_name": str(home.get("teamName") or ""),
             "home_score": int(home.get("score") or 0),
-            "away_team": str(away.get("teamTricode") or ""),
+            "away_team": normalize_tricode(away.get("teamTricode")),
             "away_team_name": str(away.get("teamName") or ""),
             "away_score": int(away.get("score") or 0),
             "game_type": type_key,
