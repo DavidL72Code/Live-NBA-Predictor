@@ -1483,7 +1483,11 @@ function renderDetail(game, liveData, events) {
 }
 
 function scoreHeaderHTML(game, homeScore, awayScore, period, clock) {
-  const clockStr = period > 0 ? `${periodLabel(period)} · ${clock || ''}` : 'Scheduled';
+  const clockStr = period > 0
+    ? `${periodLabel(period)} · ${clock || ''}`
+    : game.status === 'Final' ? 'Final'
+    : game.status === 'Live' ? 'Live'
+    : 'Scheduled';
   return `
     <div class="score-header">
       <div class="score-row">
