@@ -573,7 +573,15 @@ def _fetch_team_schedule(team_code: str, season: str) -> list[dict]:
         else:
             status_label = "Scheduled"
         season_type = event.get("seasonType") or {}
-        type_id = int(season_type.get("type") or 2)
+        # ESPN omits seasonType entirely on exhibitions against non-NBA clubs.
+        # Defaulting those to 2 labelled an October friendly "Regular season",
+        # so fall back on the date: the regular season never starts before the
+        # 20th of October.
+        if season_type.get("type") is not None:
+            type_id = int(season_type.get("type"))
+        else:
+            event_date = str(event.get("date") or "")
+            type_id = 1 if event_date[:10] < f"{start_year}-10-20" else 2
         label = str(event.get("name") or "").lower()
         if "cup" in label or "in-season" in label:
             game_type, game_type_label = "nba_cup", "NBA Cup"
